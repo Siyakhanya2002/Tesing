@@ -1,0 +1,69 @@
+name: Deploy SQL Database and Table with Detailed Steps on Ubuntu
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'sql/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest  # Ubuntu runner
+
+    steps:
+      # Step 1: Checkout the repository to access the SQL script
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      # Step 1b: Echo confirmation of checkout
+      - name: Confirm checkout
+        run: |
+          echo "Step 1: Checked out the repository containing Setup.sql"
+
+      # Step 2: Install Microsoft SQL Server tools (sqlcmd) on Ubuntu
+      - name: Install sqlcmd
+        run: |
+          echo "Step 2: Installing sqlcmd on Ubuntu"
+          # Add Microsoft package repository
+          sudo apt-get update
+          sudo apt-get install -y curl gnupg
+          curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+          curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
+          # Install mssql-tools and unixODBC
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools unixodbc-dev
+          # Add sqlcmd to PATH
+          echo "/opt/mssql-tools/bin" >> $GITHUB_PATH
+          echo "sqlcmd version: $(sqlcmd -? | grep Version)"
+          echo "Step 2 completed: sqlcmd installed"
+
+      # Step 3: Execute the consolidated SQL script against the remote SQL Server
+      - name: Deploy database, table, stored procedure, and data
+        env:
+          SQL_SERVER: ${{ secrets.SQL_SERVER }} 
+          SQL_USER: testuser
+          SQL_PASS: ${{ secrets.SQL_PASSWORD }}  
+        run: |
+          echo "Step 3: Running setup.sql to perform the following:"
+          echo "  - Create AutoTest database if it doesn't exist"
+          echo "  - Switch to AutoTest database"
+          echo "  - Create user table with Name, Surname, Email fields"
+          echo "  - Create InsertUser stored procedure"
+          echo "  - Insert sample data (John Doe, Jane Smith)"
+          echo "Connecting to $SQL_SERVER..."
+          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -i sql/setup.sql -l 60
+          echo "Step 3 completed: SQL script executed successfully"
+
+      # Step 4: Verify the deployment by querying the user table
+      - name: Verify deployment
+        env:
+          SQL_SERVER: ${{ secrets.SQL_SERVER }}
+          SQL_USER: Auto_user
+          SQL_PASS: ${{ secrets.SQL_PASSWORD }}
+        run: |
+          echo "Step 4: Verifying the setup by querying the user table"
+          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -Q "SELECT * FROM AutoTest.dbo.user" -l 60
+          echo "Step 4 completed: Verified data in user table"
