@@ -3,7 +3,7 @@ name: Deploy AutoTest Database1
 on:
   push:
     paths:
-      - 'setup.sql'
+      - 'setup1.sql'
 jobs:
   deploy-sql:
     runs-on: ubuntu-latest
