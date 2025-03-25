@@ -45,7 +45,7 @@ jobs:
         env:
           SQL_SERVER: ${{ secrets.SQL_SERVER }} 
           SQL_USER: testuser
-          SQL_PASS: ${{ secrets.SQL_PASSWORD }}  
+          SQL_PASS: ${{ secrets.SQL_PASS }}  
         run: |
           echo "Step 3: Running setup1.sql to perform the following:"
           echo "  - Create AutoTest database if it doesn't exist"
