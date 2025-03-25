@@ -1,4 +1,4 @@
-name: Deploy AutoTest Database
+name: Deploy AutoTest Database1
 
 on:
   push:
