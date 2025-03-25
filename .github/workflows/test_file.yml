@@ -61,7 +61,7 @@ jobs:
       - name: Verify deployment
         env:
           SQL_SERVER: ${{ secrets.SQL_SERVER }}
-          SQL_USER: Auto_user
+          SQL_USER: testuser
           SQL_PASS: ${{ secrets.SQL_PASSWORD }}
         run: |
           echo "Step 4: Verifying the setup by querying the user table"
