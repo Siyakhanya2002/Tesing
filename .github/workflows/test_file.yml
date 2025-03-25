@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'sql/**'
+      - 'Database/**'
 
 jobs:
   deploy:
@@ -47,14 +47,14 @@ jobs:
           SQL_USER: testuser
           SQL_PASS: ${{ secrets.SQL_PASSWORD }}  
         run: |
-          echo "Step 3: Running setup.sql to perform the following:"
+          echo "Step 3: Running setup1.sql to perform the following:"
           echo "  - Create AutoTest database if it doesn't exist"
           echo "  - Switch to AutoTest database"
           echo "  - Create user table with Name, Surname, Email fields"
           echo "  - Create InsertUser stored procedure"
           echo "  - Insert sample data (John Doe, Jane Smith)"
           echo "Connecting to $SQL_SERVER..."
-          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -i sql/setup.sql -l 60
+          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -i Database/setup1.sql -l 60
           echo "Step 3 completed: SQL script executed successfully"
 
       # Step 4: Verify the deployment by querying the user table
@@ -65,5 +65,5 @@ jobs:
           SQL_PASS: ${{ secrets.SQL_PASSWORD }}
         run: |
           echo "Step 4: Verifying the setup by querying the user table"
-          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -Q "SELECT * FROM AutoTest.dbo.user" -l 60
+          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -Q "SELECT * FROM AutoTest.db.dbo.user" -l 60
           echo "Step 4 completed: Verified data in user table"
