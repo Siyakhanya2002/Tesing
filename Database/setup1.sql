@@ -1,4 +1,4 @@
--- Create database
+-- Create databas
 CREATE DATABASE AutoTest.db;
 GO
 
