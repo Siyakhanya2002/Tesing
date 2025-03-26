@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: https://your-production-server-url  # Optional: link to where production is hosted
+      url: rnpyz-102-66-182-14.a.free.pinggy.link,40327 # Optional: link to where production is hosted
     steps:
       - name: Wait for approval
         run: echo "Awaiting manual approval to deploy to production"
