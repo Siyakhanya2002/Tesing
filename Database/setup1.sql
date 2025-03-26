@@ -1,8 +1,8 @@
 -- Create databas
-CREATE DATABASE AutoTest.db;
+CREATE DATABASE AutoTest;
 GO
 
-USE AutoTest.db;
+USE AutoTest;
 GO
 
 -- Create a stored procedure to create table and insert data
