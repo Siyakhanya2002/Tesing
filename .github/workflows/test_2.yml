@@ -1,0 +1,48 @@
+name: CI/CD SQL Deployment with Approval
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'Database/**' ]  # Only trigger if files in /Database are changed
+
+jobs:
+  development:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the repo
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      # Step 2: Install sqlcmd tool
+      - name: Install sqlcmd
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl gnupg
+          curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+          curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools unixodbc-dev
+          echo "/opt/mssql-tools/bin" >> $GITHUB_PATH
+
+      # Step 3: Run the SQL script on development (your local machine via Pinggy)
+      - name: Deploy to Development (local)
+        env:
+          SQL_SERVER: ${{ secrets.SQL_SERVER }}
+          SQL_USER: ${{ secrets.SQL_USER }}
+          SQL_PASS: ${{ secrets.SQL_PASS }}
+        run: |
+          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -i Database/setup1.sql
+
+  approve-and-deploy-production:
+    needs: development
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://your-production-server-url  # Optional: link to where production is hosted
+    steps:
+      - name: Wait for approval
+        run: echo "Awaiting manual approval to deploy to production"
+
+      - name: Deploy to Production (placeholder)
+        run: echo "You would add real production deployment here"
