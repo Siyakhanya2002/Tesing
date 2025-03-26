@@ -18,52 +18,42 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Step 1b: Echo confirmation of checkout
       - name: Confirm checkout
         run: |
-          echo "Step 1: Checked out the repository containing Setup.sql"
+         echo "Step 1: Checked out the repository containing setup1.sql"
 
-      # Step 2: Install Microsoft SQL Server tools (sqlcmd) on Ubuntu
+      # Step 2: Install Microsoft SQL Server tools (sqlcmd)
       - name: Install sqlcmd
         run: |
           echo "Step 2: Installing sqlcmd on Ubuntu"
-          # Add Microsoft package repository
           sudo apt-get update
           sudo apt-get install -y curl gnupg
           curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
           curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
-          # Install mssql-tools and unixODBC
           sudo apt-get update
           sudo ACCEPT_EULA=Y apt-get install -y mssql-tools unixodbc-dev
-          # Add sqlcmd to PATH
           echo "/opt/mssql-tools/bin" >> $GITHUB_PATH
           echo "sqlcmd version: $(sqlcmd -? | grep Version)"
           echo "Step 2 completed: sqlcmd installed"
 
-      # Step 3: Execute the consolidated SQL script against the remote SQL Server
-      - name: Deploy database, table, stored procedure, and data
+      # Step 3: Deploy database, table, stored procedure, and data
+      - name: Deploy SQL database and table
         env:
           SQL_SERVER: ${{ secrets.SQL_SERVER }} 
           SQL_USER: testuser
           SQL_PASS: ${{ secrets.SQL_PASS }}  
         run: |
-          echo "Step 3: Running setup1.sql to perform the following:"
-          echo "  - Create AutoTest database if it doesn't exist"
-          echo "  - Switch to AutoTest database"
-          echo "  - Create user table with Name, Surname, Email fields"
-          echo "  - Create InsertUser stored procedure"
-          echo "  - Insert sample data (John Doe, Jane Smith)"
-          echo "Connecting to $SQL_SERVER..."
+          echo "Step 3: Running setup1.sql"
           sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -i Database/setup1.sql -l 60
-          echo "Step 3 completed: SQL script executed successfully"
+          echo "Step 3 completed: SQL script executed"
 
-      # Step 4: Verify the deployment by querying the user table
+      # Step 4: Verify deployment by querying the table
       - name: Verify deployment
         env:
           SQL_SERVER: ${{ secrets.SQL_SERVER }}
           SQL_USER: testuser
-          SQL_PASS: ${{ secrets.SQL_PASSWORD }}
+          SQL_PASS: ${{ secrets.SQL_PASS }}
         run: |
-          echo "Step 4: Verifying the setup by querying the user table"
-          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -Q "SELECT * FROM AutoTest.db.dbo.user" -l 60
+          echo "Step 4: Verifying data in user table"
+          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -Q "USE AutoTest; SELECT * FROM [user];" -l 60
           echo "Step 4 completed: Verified data in user table"
