@@ -1,4 +1,4 @@
-name: Deploy SQL Database and Table with Detailed Steps on Ubuntu
+name: Deploy SQL Database and Table 
 
 on:
   push:
