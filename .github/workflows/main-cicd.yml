@@ -1,0 +1,39 @@
+name: CI/CD SQL Deployment with Manual Approval
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'Database/**' ]
+
+jobs:
+  development:
+    name: Deploy to Development
+    uses: ./.github/workflows/sql-template.yml
+    with:
+      sql_file: Database/setup1.sql
+    secrets:
+      sql_server: ${{ secrets.SQL_SERVER }}
+      sql_user: ${{ secrets.SQL_USER }}
+      sql_pass: ${{ secrets.SQL_PASS }}
+
+  approve-production:
+    name: Wait for Manual Approval
+    needs: development
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: 'rnkmq-102-66-182-198.a.free.pinggy.link,38609'
+    steps:
+      - name: Awaiting approval to deploy to production
+        run: echo "Approved! Proceeding to production deployment."
+
+  run-production-deploy:
+    name: Deploy to Production via Template
+    needs: approve-production
+    uses: ./.github/workflows/sql-template.yml
+    with:
+      sql_file: Database/setup1.sql
+    secrets:
+      sql_server: ${{ secrets.PROD_SQL_SERVER }}
+      sql_user: ${{ secrets.PROD_SQL_USER }}
+      sql_pass: ${{ secrets.PROD_SQL_PASS }}
