@@ -29,7 +29,7 @@ jobs:
         SQL_USER: ${{ secrets.SQL_USERNAME }}
         SQL_PASS: ${{ secrets.SQL_PASSWORD }}
       run: |
-        echo Running SQL script to deploy TimesheetDB
+        echo Running SQL script to deploy TimesheetDB...
         sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -i "Database\create_timesheetdb.sql" -l 60
 
     - name: Create SSISDB folder if not exists
@@ -47,33 +47,19 @@ jobs:
         echo END >> create_folder.sql
         sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -i create_folder.sql -l 60
 
-    - name: Deploy SSIS Package (.ispac)
-      shell: powershell
+    - name: Deploy SSIS Package using ISDeploymentWizard
+      shell: cmd
       env:
         SQL_SERVER: ${{ secrets.SQL_SERVER }}
-        SQL_USER: ${{ secrets.SQL_USERNAME }}
-        SQL_PASS: ${{ secrets.SQL_PASSWORD }}
-        SSIS_FOLDER_NAME: ${{ env.SSIS_FOLDER_NAME }}
         SSIS_PROJECT_NAME: ${{ env.SSIS_PROJECT_NAME }}
+        SSIS_FOLDER_NAME: ${{ env.SSIS_FOLDER_NAME }}
       run: |
-        $ispacPath = "Database/bin/Development/Integration Services Project1.ispac"
-        if (!(Test-Path $ispacPath)) {
-          Write-Error "ISPAC not found at: $ispacPath"
-          exit 1
-        }
-        $projectBytes = [System.IO.File]::ReadAllBytes($ispacPath)
-        $hex = [System.BitConverter]::ToString($projectBytes) -replace '-', ''
-        @"
-        DECLARE @ispac VARBINARY(MAX) = 0x$hex;
-        DECLARE @operation_id BIGINT;
-        EXEC SSISDB.catalog.deploy_project 
-          @folder_name = N'$env:SSIS_FOLDER_NAME',
-          @project_name = N'$env:SSIS_PROJECT_NAME',
-          @project_stream = @ispac,
-          @operation_id = @operation_id OUTPUT;
-        SELECT @operation_id AS operation_id;
-        "@ | Out-File deploy.sql -Encoding UTF8
-        sqlcmd -S "$env:SQL_SERVER" -U "$env:SQL_USER" -P "$env:SQL_PASS" -i deploy.sql -l 60
+        echo Deploying SSIS package using ISDeploymentWizard...
+        "C:\Program Files (x86)\Microsoft SQL Server\150\DTS\Binn\ISDeploymentWizard.exe" ^
+          /Silent ^
+          /SourcePath:"Database\bin\Development\Integration Services Project1.ispac" ^
+          /DestinationServer:"%SQL_SERVER%" ^
+          /DestinationPath:"\SSISDB\%SSIS_FOLDER_NAME%"
 
     - name: Create SQL Agent Job
       shell: cmd
