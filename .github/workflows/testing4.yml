@@ -1,0 +1,97 @@
+name: Deploy TimesheetDB and SSIS Package with SQL Agent Job
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Database/**'
+  workflow_dispatch:
+
+env:
+  SSIS_FOLDER_NAME: Timesheet
+  SSIS_PROJECT_NAME: Integration Services Project1
+  SSIS_PACKAGE_NAME: MigrateExcelData.dtsx
+  SQL_AGENT_JOB_NAME: RunTimesheetMigration
+
+jobs:
+  deploy-and-schedule:
+    runs-on: self-hosted
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Deploy TimesheetDB database
+      shell: cmd
+      env:
+        SQL_SERVER: ${{ secrets.SQL_SERVER }}
+        SQL_USER: ${{ secrets.SQL_USERNAME }}
+        SQL_PASS: ${{ secrets.SQL_PASSWORD }}
+      run: |
+        echo Running SQL script to deploy TimesheetDB
+        sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -i "Database\create_timesheetdb.sql" -l 60
+
+    - name: Create SSISDB folder if not exists
+      shell: cmd
+      env:
+        SQL_SERVER: ${{ secrets.SQL_SERVER }}
+        SQL_USER: ${{ secrets.SQL_USERNAME }}
+        SQL_PASS: ${{ secrets.SQL_PASSWORD }}
+        SSIS_FOLDER_NAME: ${{ env.SSIS_FOLDER_NAME }}
+      run: |
+        sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -Q ^
+          "IF NOT EXISTS (SELECT * FROM SSISDB.catalog.folders WHERE name = '%SSIS_FOLDER_NAME%') ^
+           BEGIN EXEC catalog.create_folder @folder_name = '%SSIS_FOLDER_NAME%'; END"
+
+    - name: Deploy SSIS Package (.ispac)
+      shell: powershell
+      env:
+        SQL_SERVER: ${{ secrets.SQL_SERVER }}
+        SQL_USER: ${{ secrets.SQL_USERNAME }}
+        SQL_PASS: ${{ secrets.SQL_PASSWORD }}
+        SSIS_FOLDER_NAME: ${{ env.SSIS_FOLDER_NAME }}
+        SSIS_PROJECT_NAME: ${{ env.SSIS_PROJECT_NAME }}
+      run: |
+        $ispac = "Database/bin/Development/Integration Services Project1.ispac"
+        if (!(Test-Path $ispac)) {
+          Write-Error "ISPAC not found at: $ispac"
+          exit 1
+        }
+        $bytes = [System.IO.File]::ReadAllBytes($ispac)
+        $hex = [System.BitConverter]::ToString($bytes) -replace '-', ''
+        @"
+        DECLARE @ispac VARBINARY(MAX) = 0x$hex;
+        DECLARE @op_id BIGINT;
+        EXEC SSISDB.catalog.deploy_project 
+          @folder_name = N'$env:SSIS_FOLDER_NAME',
+          @project_name = N'$env:SSIS_PROJECT_NAME',
+          @project_stream = @ispac,
+          @operation_id = @op_id OUTPUT;
+        "@ | Out-File deploy.sql -Encoding utf8
+        sqlcmd -S "$env:SQL_SERVER" -U "$env:SQL_USER" -P "$env:SQL_PASS" -i deploy.sql -l 60
+
+    - name: Create SQL Agent Job
+      shell: cmd
+      env:
+        SQL_SERVER: ${{ secrets.SQL_SERVER }}
+        SQL_USER: ${{ secrets.SQL_USERNAME }}
+        SQL_PASS: ${{ secrets.SQL_PASSWORD }}
+        SSIS_FOLDER_NAME: ${{ env.SSIS_FOLDER_NAME }}
+        SSIS_PROJECT_NAME: ${{ env.SSIS_PROJECT_NAME }}
+        SSIS_PACKAGE_NAME: ${{ env.SSIS_PACKAGE_NAME }}
+        SQL_AGENT_JOB_NAME: ${{ env.SQL_AGENT_JOB_NAME }}
+        EXCEL_PATH: ${{ secrets.EXCEL_PATH }}
+      run: |
+        sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -Q ^
+        "USE msdb; ^
+         IF EXISTS (SELECT 1 FROM sysjobs WHERE name = '%SQL_AGENT_JOB_NAME%') ^
+           EXEC sp_delete_job @job_name = '%SQL_AGENT_JOB_NAME%'; ^
+         EXEC sp_add_job @job_name = N'%SQL_AGENT_JOB_NAME%'; ^
+         EXEC sp_add_jobstep @job_name = N'%SQL_AGENT_JOB_NAME%', ^
+             @step_name = N'Run SSIS Package', ^
+             @subsystem = N'SSIS', ^
+             @command = N'/ISSERVER \"\SSISDB\%SSIS_FOLDER_NAME%\%SSIS_PROJECT_NAME%\%SSIS_PACKAGE_NAME%\" /SERVER \"%SQL_SERVER%\" /Par \"ExcelFilePath\";\"%EXCEL_PATH%\"', ^
+             @database_name = N'master'; ^
+         EXEC sp_add_jobschedule @job_name = N'%SQL_AGENT_JOB_NAME%', @name = N'DailyRun', @freq_type = 4, @freq_interval = 1, @active_start_time = 010000; ^
+         EXEC sp_add_jobserver @job_name = N'%SQL_AGENT_JOB_NAME%';"
