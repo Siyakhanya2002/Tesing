@@ -1,0 +1,45 @@
+name: Database Automation
+ 
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+ 
+jobs:
+  build-db:
+    runs-on: ubuntu-latest
+ 
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+ 
+      - name: Install SQL Server tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl gnupg apt-transport-https
+          # Add Microsoft repository key
+          curl https://packages.microsoft.com/keys/microsoft.asc | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc
+          # Add Microsoft Ubuntu 22.04 repository (24.04 may not have full support yet)
+          curl https://packages.microsoft.com/config/ubuntu/22.04/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          sudo apt-get update
+          # Install mssql-tools and unixodbc-dev
+          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools unixodbc-dev
+          # Persist mssql-tools path for all sessions
+          echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bashrc
+          echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.profile
+          echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bash_profile
+          source ~/.bashrc
+          # Verify sqlcmd is available
+          /opt/mssql-tools/bin/sqlcmd -? || echo "sqlcmd installation failed"
+ 
+      - name: Run SQL script
+        env:
+          SQL_SERVER: ${{ secrets.SQL_SERVER }}
+          SQL_USERNAME: ${{ secrets.SQL_USERNAME }}
+          SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
+        run: |
+          /opt/mssql-tools/bin/sqlcmd -S $SQL_SERVER -U $SQL_USERNAME -P $SQL_PASSWORD  -i Timesheet/SqlScripts/CreateDatabaseProject.sql -o output.txt
+          cat output.txt
