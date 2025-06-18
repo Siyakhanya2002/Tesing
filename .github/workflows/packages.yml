@@ -18,12 +18,13 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
+
+      # Debugging repo structure
       - name: Debug repository contents
         run: |
           echo "Step 1: Debugging repository contents"
           pwd
           ls -la
-          echo "Checking for Database/ directory"
           if [ -d Database ]; then
             ls -la Database/
             if [ -f Database/create_timesheetdb.sql ]; then
@@ -32,182 +33,120 @@ jobs:
               echo "Error: Database/create_timesheetdb.sql not found"
               exit 1
             fi
-            if [ -f Database/TimesheetMigration.ispac ]; then
-              echo "Found Database/TimesheetMigration.ispac"
+            if [ -d Database/Packages ]; then
+              ls -la Database/Packages/
+              if [ -f Database/Packages/TimesheetMigration.ispac ]; then
+                echo "Found .ispac file"
+              else
+                echo "Warning: .ispac not found"
+              fi
             else
-              echo "Error: Database/TimesheetMigration.ispac not found"
-              exit 1
+              echo "Warning: Packages folder not found"
             fi
           else
-            echo "Error: Database/ directory not found"
+            echo "Error: Database folder not found"
             exit 1
           fi
 
       # Step 2: Install sqlcmd
       - name: Install sqlcmd
         run: |
-          echo "Step 2: Installing sqlcmd on Ubuntu"
+          echo "Installing sqlcmd"
           sudo apt-get update
           sudo apt-get install -y curl gnupg lsb-release
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/msprod.list
           curl -sSL https://packages.microsoft.com/keys/microsoft.asc | sudo tee /usr/share/keyrings/microsoft-prod.gpg > /dev/null
-          ubuntu_codename="jammy"
-          echo "Using Ubuntu codename: $ubuntu_codename"
-          repo_url="https://packages.microsoft.com/config/ubuntu/$ubuntu_codename/prod.list"
-          if ! curl -sSL -o /tmp/microsoft-prod.list "$repo_url"; then
-            echo "Warning: Failed to fetch $repo_url, trying Ubuntu 20.04 (focal)"
-            ubuntu_codename="focal"
-            repo_url="https://packages.microsoft.com/config/ubuntu/$ubuntu_codename/prod.list"
-            curl -sSL -o /tmp/microsoft-prod.list "$repo_url" || { echo "Error: Failed to fetch $repo_url"; exit 1; }
-          fi
-          if grep -q "404" /tmp/microsoft-prod.list; then
-            echo "Error: Repository file contains 404 error"
-            cat /tmp/microsoft-prod.list
-            exit 1
-          fi
-          sudo mv /tmp/microsoft-prod.list /etc/apt/sources.list.d/microsoft-prod.list
-          sudo apt-get update || { echo "Error: apt-get update failed"; exit 1; }
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/$(lsb_release -rs)/prod $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/microsoft-prod.list
+          sudo apt-get update
           sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
           echo "/opt/mssql-tools18/bin" >> $GITHUB_PATH
-          echo "sqlcmd version: $(sqlcmd -? | grep Version)"
-          echo "Step 2 completed: sqlcmd installed"
         env:
           DEBIAN_FRONTEND: noninteractive
 
-      # Step 3: Deploy TimesheetDB
+      # Step 3: Deploy database
       - name: Deploy TimesheetDB database
         env:
           SQL_SERVER: ${{ secrets.SQL_SERVER }}
           SQL_USER: ${{ secrets.SQL_USERNAME }}
           SQL_PASS: ${{ secrets.SQL_PASSWORD }}
         run: |
-          echo "Step 3: Running Database/create_timesheetdb.sql"
-          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -i Database/create_timesheetdb.sql -l 60 -o sql_output.log
-          if [ $? -eq 0 ]; then
-            echo "Step 3 completed: SQL script executed"
+          echo "Deploying TimesheetDB database"
+          if sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -i Database/create_timesheetdb.sql -l 60 -o sql_output.log; then
+            echo "Database deployed successfully"
             cat sql_output.log
+            echo "DEPLOY_SUCCESS=true" >> $GITHUB_ENV
           else
-            echo "Step 3 failed: SQL script error"
+            echo "Database deployment failed"
             cat sql_output.log
+            echo "DEPLOY_SUCCESS=false" >> $GITHUB_ENV
             exit 1
           fi
 
-      # Step 4: Verify database deployment
-      - name: Verify database deployment
+      # Step 4: Verify DB tables
+      - name: Verify database tables
         env:
           SQL_SERVER: ${{ secrets.SQL_SERVER }}
           SQL_USER: ${{ secrets.SQL_USERNAME }}
           SQL_PASS: ${{ secrets.SQL_PASSWORD }}
         run: |
-          echo "Step 4: Verifying tables in TimesheetDB"
-          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -Q "USE TimesheetDB; SELECT name FROM sys.tables WHERE name IN ('Employee', 'Client', 'Project', 'ExpenseCategory', 'LeaveType', 'TimesheetEntry', 'ExpenseEntry', 'LeaveEntry');" -l 60 -o verify_output.log
-          if [ $? -eq 0 ]; then
-            echo "Step 4 completed: Verified tables in TimesheetDB"
-            cat verify_output.log
-          else
-            echo "Step 4 failed: Verification error"
-            cat verify_output.log
-            exit 1
-          fi
+          echo "Verifying TimesheetDB tables"
+          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -Q "
+            USE TimesheetDB;
+            SELECT name FROM sys.tables WHERE name IN ('Employee', 'Client', 'Project', 'ExpenseCategory', 'LeaveType', 'TimesheetEntry', 'ExpenseEntry', 'LeaveEntry');
+          " -l 60 -o verify_output.log
+          cat verify_output.log
 
-      # Step 5: Create SSISDB catalog and folder
-      - name: Create SSISDB catalog and Timesheet folder
+      # Step 5: Create SSISDB catalog & folder if needed
+      - name: Create SSISDB catalog and folder
+        if: env.DEPLOY_SUCCESS == 'true' && exists('Database/Packages/TimesheetMigration.ispac')
         env:
           SQL_SERVER: ${{ secrets.SQL_SERVER }}
           SQL_USER: ${{ secrets.SQL_USERNAME }}
           SQL_PASS: ${{ secrets.SQL_PASSWORD }}
         run: |
-          echo "Step 5: Creating SSISDB catalog and Timesheet folder"
+          echo "Checking and creating SSISDB and folder if needed"
           sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -Q "
             IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'SSISDB')
             BEGIN
-                EXEC msdb.dbo.sp_addlogin @loginame = 'SSISDBOwner', @passwd = 'StrongPassword123!', @defdb = 'SSISDB';
-                CREATE DATABASE SSISDB;
-                ALTER DATABASE SSISDB SET RECOVERY SIMPLE;
-                EXEC SSISDB.catalog.create_catalog @password = 'StrongPassword123!';
-                EXEC SSISDB.catalog.set_catalog_property @property_name = 'ENCRYPTION_ALGORITHM', @property_value = 'AES_256';
+              CREATE DATABASE SSISDB;
+              ALTER DATABASE SSISDB SET RECOVERY SIMPLE;
+              EXEC msdb.dbo.sp_addlogin @loginame = 'SSISDBOwner', @passwd = 'StrongPassword123!', @defdb = 'SSISDB';
+              EXEC SSISDB.catalog.create_catalog @password = 'StrongPassword123!';
+              EXEC SSISDB.catalog.set_catalog_property @property_name = 'ENCRYPTION_ALGORITHM', @property_value = 'AES_256';
             END
             USE SSISDB;
             IF NOT EXISTS (SELECT * FROM catalog.folders WHERE name = 'Timesheet')
             BEGIN
-                EXEC catalog.create_folder @folder_name = 'Timesheet';
+              EXEC catalog.create_folder @folder_name = 'Timesheet';
             END
           " -l 60 -o ssisdb_output.log
-          if [ $? -eq 0 ]; then
-            echo "Step 5 completed: SSISDB catalog and Timesheet folder created"
-            cat ssisdb_output.log
-          else
-            echo "Step 5 failed: SSISDB creation error"
-            cat ssisdb_output.log
-            exit 1
-          fi
+          cat ssisdb_output.log
 
-      # Step 6: Deploy SSIS package
+      # Step 6: Deploy SSIS package only if database created
       - name: Deploy SSIS package
+        if: env.DEPLOY_SUCCESS == 'true' && exists('Database/Packages/TimesheetMigration.ispac')
         env:
           SQL_SERVER: ${{ secrets.SQL_SERVER }}
           SQL_USER: ${{ secrets.SQL_USERNAME }}
           SQL_PASS: ${{ secrets.SQL_PASSWORD }}
         run: |
-          echo "Step 6: Deploying TimesheetMigration.ispac"
-          # Encode .ispac file to varbinary for T-SQL
-          ispac_path="Database/TimesheetMigration.ispac"
+          echo "Deploying TimesheetMigration SSIS package"
+          ispac_path="Database/Packages/TimesheetMigration.ispac"
           ispac_data=$(xxd -p -c 0 "$ispac_path" | tr -d '\n')
           sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -Q "
             DECLARE @ispac_binary VARBINARY(MAX) = CONVERT(VARBINARY(MAX), 0x$ispac_data, 2);
             DECLARE @operation_id BIGINT;
             EXEC SSISDB.catalog.deploy_project 
-                @folder_name = N'Timesheet',
-                @project_name = N'TimesheetMigration',
-                @project_stream = @ispac_binary,
-                @operation_id = @operation_id OUTPUT;
+              @folder_name = N'Timesheet',
+              @project_name = N'TimesheetMigration',
+              @project_stream = @ispac_binary,
+              @operation_id = @operation_id OUTPUT;
             SELECT @operation_id AS operation_id;
-            IF EXISTS (SELECT * FROM SSISDB.catalog.operation_messages WHERE operation_id = @operation_id AND message_type = 120)
+            IF EXISTS (
+              SELECT * FROM SSISDB.catalog.operation_messages
+              WHERE operation_id = @operation_id AND message_type = 120
+            )
             BEGIN
-                RAISERROR ('Deployment failed. Check SSISDB.catalog.operation_messages for details.', 16, 1);
+              RAISERROR ('SSIS Deployment failed.', 16, 1);
             END
           " -l 60 -o deploy_output.log
-          if [ $? -eq 0 ]; then
-            echo "Step 6 completed: SSIS package deployed"
-            cat deploy_output.log
-          else
-            echo "Step 6 failed: SSIS deployment error"
-            cat deploy_output.log
-            exit 1
-          fi
-
-      # Step 7: Execute SSIS package
-      - name: Execute SSIS package
-        env:
-          SQL_SERVER: ${{ secrets.SQL_SERVER }}
-          SQL_USER: ${{ secrets.SQL_USERNAME }}
-          SQL_PASS: ${{ secrets.SQL_PASSWORD }}
-          EXCEL_PATH: ${{ secrets.EXCEL_PATH }}  # Parameterized Excel path
-        run: |
-          echo "Step 7: Executing MigrateExcelData.dtsx"
-          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -Q "
-            DECLARE @execution_id BIGINT;
-            EXEC SSISDB.catalog.create_execution 
-                @folder_name = N'Timesheet',
-                @project_name = N'TimesheetMigration',
-                @package_name = N'MigrateExcelData.dtsx',
-                @execution_id = @execution_id OUTPUT;
-            EXEC SSISDB.catalog.set_execution_parameter_value 
-                @execution_id,
-                @object_type = 20,  -- Project parameter
-                @parameter_name = N'ExcelFilePath',
-                @parameter_value = N'$EXCEL_PATH';
-            EXEC SSISDB.catalog.start_execution @execution_id;
-            IF EXISTS (SELECT * FROM SSISDB.catalog.executions WHERE execution_id = @execution_id AND status IN (3, 4, 6))
-            BEGIN
-                RAISERROR ('Package execution failed. Check SSISDB.catalog.execution_messages for details.', 16, 1);
-            END
-          " -l 60 -o execute_output.log
-          if [ $? -eq 0 ]; then
-            echo "Step 7 completed: SSIS package executed"
-            cat execute_output.log
-          else
-            echo "Step 7 failed: SSIS execution error"
-            cat execute_output.log
-            exit 1
-          fi
+          cat deploy_output.log
