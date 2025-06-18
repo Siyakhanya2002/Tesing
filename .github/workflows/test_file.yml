@@ -1,4 +1,4 @@
-name: Deploy SQL Database and Table 
+name: Deploy TimesheetDB Database
 
 on:
   push:
@@ -6,10 +6,11 @@ on:
       - main
     paths:
       - 'Database/**'
+  workflow_dispatch:  # Allows manual triggering
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest  # Ubuntu runner
+    runs-on: ubuntu-latest  # GitHub-hosted Ubuntu runner
 
     steps:
       # Step 1: Checkout the repository to access the SQL script
@@ -17,10 +18,16 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-
       - name: Confirm checkout
         run: |
-         echo "Step 1: Checked out the repository containing setup1.sql"
+          echo "Step 1: Checked out the repository containing sql/create_timesheetdb.sql"
+          ls -la sql/ || { echo "sql/ directory not found"; exit 1; }
+          if [ -f sql/create_timesheetdb.sql ]; then
+            echo "Found sql/create_timesheetdb.sql"
+          else
+            echo "Error: sql/create_timesheetdb.sql not found"
+            exit 1
+          fi
 
       # Step 2: Install Microsoft SQL Server tools (sqlcmd)
       - name: Install sqlcmd
@@ -36,24 +43,38 @@ jobs:
           echo "sqlcmd version: $(sqlcmd -? | grep Version)"
           echo "Step 2 completed: sqlcmd installed"
 
-      # Step 3: Deploy database, table, stored procedure, and data
-      - name: Deploy SQL database and table
+      # Step 3: Deploy database, table, stored procedure
+      - name: Deploy TimesheetDB database
         env:
-          SQL_SERVER: ${{ secrets.SQL_SERVER }} 
-          SQL_USER: testuser
-          SQL_PASS: ${{ secrets.SQL_PASS }}  
+          SQL_SERVER: ${{ secrets.SQL_SERVER }}
+          SQL_USER: ${{ secrets.SQL_USERNAME }}
+          SQL_PASS: ${{ secrets.SQL_PASSWORD }}
         run: |
-          echo "Step 3: Running setup1.sql"
-          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -i Database/setup1.sql -l 60
-          echo "Step 3 completed: SQL script executed"
+          echo "Step 3: Running sql/create_timesheetdb.sql"
+          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -i sql/create_timesheetdb.sql -l 60 -o sql_output.log
+          if [ $? -eq 0 ]; then
+            echo "Step 3 completed: SQL script executed"
+            cat sql_output.log
+          else
+            echo "Step 3 failed: SQL script error"
+            cat sql_output.log
+            exit 1
+          fi
 
-      # Step 4: Verify deployment by querying the table
+      # Step 4: Verify deployment by querying the tables
       - name: Verify deployment
         env:
           SQL_SERVER: ${{ secrets.SQL_SERVER }}
-          SQL_USER: testuser
-          SQL_PASS: ${{ secrets.SQL_PASS }}
+          SQL_USER: ${{ secrets.SQL_USERNAME }}
+          SQL_PASS: ${{ secrets.SQL_PASSWORD }}
         run: |
-          echo "Step 4: Verifying data in user table"
-          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -Q "USE AutoTest; SELECT * FROM [user];" -l 60
-          echo "Step 4 completed: Verified data in user table"
+          echo "Step 4: Verifying tables in TimesheetDB"
+          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -Q "USE TimesheetDB; SELECT name FROM sys.tables WHERE name IN ('Employee', 'Client', 'Project', 'ExpenseCategory', 'LeaveType', 'TimesheetEntry', 'ExpenseEntry', 'LeaveEntry');" -l 60 -o verify_output.log
+          if [ $? -eq 0 ]; then
+            echo "Step 4 completed: Verified tables in TimesheetDB"
+            cat verify_output.log
+          else
+            echo "Step 4 failed: Verification error"
+            cat verify_output.log
+            exit 1
+          fi
