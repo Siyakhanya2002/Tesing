@@ -1,7 +1,6 @@
 USE master;
 GO
 
--- Create stored procedure to set up TimesheetDB
 IF OBJECT_ID('dbo.usp_CreateTimesheetDB', 'P') IS NOT NULL
     DROP PROCEDURE dbo.usp_CreateTimesheetDB;
 GO
@@ -11,7 +10,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- Ensure the database exists
+    -- Create database if it doesn't exist
     IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'TimesheetDB')
     BEGIN
         CREATE DATABASE TimesheetDB;
@@ -159,6 +158,5 @@ BEGIN
 END;
 GO
 
--- Execute the stored procedure
 EXEC dbo.usp_CreateTimesheetDB;
 GO
