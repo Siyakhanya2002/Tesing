@@ -10,19 +10,20 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest  # GitHub-hosted Ubuntu runner
+    runs-on: ubuntu-latest  # You can change this to `ubuntu-22.04` if you prefer stability
 
     steps:
-      # Step 1: Checkout the repository to access the SQL script
+      # Step 1: Checkout the repository
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
+
       - name: Debug repository contents
         run: |
           echo "Step 1: Debugging repository contents"
-          pwd  # Show current directory
-          ls -la  # List all files and folders
+          pwd
+          ls -la
           echo "Checking for Database/ directory"
           if [ -d Database ]; then
             ls -la Database/
@@ -43,31 +44,37 @@ jobs:
           echo "Step 2: Installing sqlcmd on Ubuntu"
           sudo apt-get update
           sudo apt-get install -y curl gnupg lsb-release
-          # Clean up existing Microsoft repository files
+
+          # Detect Ubuntu codename
+          ubuntu_codename=$(lsb_release -cs)
+          echo "Detected Ubuntu codename: $ubuntu_codename"
+
+          # Fallback if noble is unsupported
+          if [ "$ubuntu_codename" = "noble" ]; then
+            echo "Microsoft repo for 'noble' not available. Falling back to 'jammy'"
+            ubuntu_codename="jammy"
+          fi
+
+          # Clean up old Microsoft repo files
           sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/msprod.list
+
           # Add Microsoft GPG key
           curl -sSL https://packages.microsoft.com/keys/microsoft.asc | sudo tee /usr/share/keyrings/microsoft-prod.gpg > /dev/null
-          # Add Microsoft repository with fallback
-          ubuntu_codename="jammy"  # Start with Ubuntu 22.04
-          echo "Using Ubuntu codename: $ubuntu_codename"
+
+          # Download the Microsoft repo list
           repo_url="https://packages.microsoft.com/config/ubuntu/$ubuntu_codename/prod.list"
+          echo "Fetching Microsoft repo list from: $repo_url"
           if ! curl -sSL -o /tmp/microsoft-prod.list "$repo_url"; then
-            echo "Warning: Failed to fetch $repo_url, trying Ubuntu 20.04 (focal)"
-            ubuntu_codename="focal"
-            repo_url="https://packages.microsoft.com/config/ubuntu/$ubuntu_codename/prod.list"
-            curl -sSL -o /tmp/microsoft-prod.list "$repo_url" || { echo "Error: Failed to fetch $repo_url"; exit 1; }
-          fi
-          # Validate repository file
-          if grep -q "404" /tmp/microsoft-prod.list; then
-            echo "Error: Repository file contains 404 error"
-            cat /tmp/microsoft-prod.list
+            echo "Error: Failed to download Microsoft repository list from $repo_url"
             exit 1
           fi
+
           sudo mv /tmp/microsoft-prod.list /etc/apt/sources.list.d/microsoft-prod.list
-          # Update package lists
+
+          # Update packages and install tools
           sudo apt-get update || { echo "Error: apt-get update failed"; exit 1; }
-          # Install mssql-tools18 and unixodbc-dev
           sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
+
           # Add sqlcmd to PATH
           echo "/opt/mssql-tools18/bin" >> $GITHUB_PATH
           echo "sqlcmd version: $(sqlcmd -? | grep Version)"
