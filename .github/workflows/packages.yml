@@ -1,0 +1,93 @@
+name: Deploy TimesheetDB and SSIS Package
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Database/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Install sqlcmd tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y curl gnupg lsb-release
+        curl -sSL https://packages.microsoft.com/keys/microsoft.asc | sudo tee /usr/share/keyrings/microsoft-prod.gpg > /dev/null
+        echo "deb [signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list" | sudo tee /etc/apt/sources.list.d/microsoft-prod.list
+        sudo apt-get update
+        sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
+        echo "/opt/mssql-tools18/bin" >> $GITHUB_PATH
+
+    - name: Deploy TimesheetDB
+      env:
+        SQL_SERVER: ${{ secrets.SQL_SERVER }}
+        SQL_USER: ${{ secrets.SQL_USERNAME }}
+        SQL_PASS: ${{ secrets.SQL_PASSWORD }}
+      run: |
+        echo "Creating TimesheetDB and necessary tables..."
+        /opt/mssql-tools18/bin/sqlcmd -S $SQL_SERVER -U $SQL_USER -P $SQL_PASS -i Database/create_timesheetdb.sql -l 60 -o output.log
+        cat output.log
+        if grep -q "Msg" output.log; then
+          echo "❌ SQL error during database creation"
+          exit 1
+        fi
+        echo "✅ TimesheetDB deployment completed"
+
+    - name: Deploy SSISDB catalog and Timesheet folder
+      if: hashFiles('Database/Packages/TimesheetMigration.ispac') != ''
+      env:
+        SQL_SERVER: ${{ secrets.SQL_SERVER }}
+        SQL_USER: ${{ secrets.SQL_USERNAME }}
+        SQL_PASS: ${{ secrets.SQL_PASSWORD }}
+      run: |
+        echo "Checking or creating SSISDB and Timesheet folder..."
+        /opt/mssql-tools18/bin/sqlcmd -S $SQL_SERVER -U $SQL_USER -P $SQL_PASS -Q "
+        IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'SSISDB')
+        BEGIN
+            EXEC msdb.dbo.sp_addlogin @loginame = 'SSISDBOwner', @passwd = 'StrongPassword123!', @defdb = 'SSISDB';
+            CREATE DATABASE SSISDB;
+            ALTER DATABASE SSISDB SET RECOVERY SIMPLE;
+            EXEC SSISDB.catalog.create_catalog @password = 'StrongPassword123!';
+            EXEC SSISDB.catalog.set_catalog_property @property_name = 'ENCRYPTION_ALGORITHM', @property_value = 'AES_256';
+        END
+        USE SSISDB;
+        IF NOT EXISTS (SELECT * FROM catalog.folders WHERE name = 'Timesheet')
+        BEGIN
+            EXEC catalog.create_folder @folder_name = 'Timesheet';
+        END
+        " -l 60 -o ssisdb_create.log
+        cat ssisdb_create.log
+
+    - name: Deploy SSIS package
+      if: hashFiles('Database/Packages/TimesheetMigration.ispac') != ''
+      env:
+        SQL_SERVER: ${{ secrets.SQL_SERVER }}
+        SQL_USER: ${{ secrets.SQL_USERNAME }}
+        SQL_PASS: ${{ secrets.SQL_PASSWORD }}
+      run: |
+        echo "Deploying SSIS package..."
+        ispac_path="Database/Packages/TimesheetMigration.ispac"
+        ispac_data=$(xxd -p -c 0 "$ispac_path" | tr -d '\n')
+        /opt/mssql-tools18/bin/sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -Q "
+        DECLARE @ispac_binary VARBINARY(MAX) = CONVERT(VARBINARY(MAX), 0x$ispac_data, 2);
+        DECLARE @operation_id BIGINT;
+        EXEC SSISDB.catalog.deploy_project 
+            @folder_name = N'Timesheet',
+            @project_name = N'TimesheetMigration',
+            @project_stream = @ispac_binary,
+            @operation_id = @operation_id OUTPUT;
+        SELECT @operation_id AS operation_id;
+        IF EXISTS (SELECT * FROM SSISDB.catalog.operation_messages WHERE operation_id = @operation_id AND message_type = 120)
+        BEGIN
+            RAISERROR ('❌ SSIS deployment failed. Check catalog.operation_messages for details.', 16, 1);
+        END
+        " -l 60 -o ssis_deploy.log
+        cat ssis_deploy.log
