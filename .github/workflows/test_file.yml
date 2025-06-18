@@ -5,8 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'sql/**'
-      - 'Database/**'  # Include in case your repo uses Database/
+      - 'Database/**'
   workflow_dispatch:  # Allows manual triggering
 
 jobs:
@@ -24,23 +23,17 @@ jobs:
           echo "Step 1: Debugging repository contents"
           pwd  # Show current directory
           ls -la  # List all files and folders
-          echo "Checking for sql/ directory"
-          if [ -d sql ]; then
-            ls -la sql/
-            if [ -f sql/create_timesheetdb.sql ]; then
-              echo "Found sql/create_timesheetdb.sql"
+          echo "Checking for Database/ directory"
+          if [ -d Database ]; then
+            ls -la Database/
+            if [ -f Database/create_timesheetdb.sql ]; then
+              echo "Found Database/create_timesheetdb.sql"
             else
-              echo "Error: sql/create_timesheetdb.sql not found"
+              echo "Error: Database/create_timesheetdb.sql not found"
               exit 1
             fi
           else
-            echo "sql/ directory not found"
-            echo "Checking for Database/ directory"
-            if [ -d Database ]; then
-              ls -la Database/
-            else
-              echo "Database/ directory not found"
-            fi
+            echo "Error: Database/ directory not found"
             exit 1
           fi
 
@@ -76,8 +69,8 @@ jobs:
           SQL_USER: ${{ secrets.SQL_USERNAME }}
           SQL_PASS: ${{ secrets.SQL_PASSWORD }}
         run: |
-          echo "Step 3: Running sql/create_timesheetdb.sql"
-          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -i sql/create_timesheetdb.sql -l 60 -o sql_output.log
+          echo "Step 3: Running Database/create_timesheetdb.sql"
+          sqlcmd -S "$SQL_SERVER" -U "$SQL_USER" -P "$SQL_PASS" -i Database/create_timesheetdb.sql -l 60 -o sql_output.log
           if [ $? -eq 0 ]; then
             echo "Step 3 completed: SQL script executed"
             cat sql_output.log
