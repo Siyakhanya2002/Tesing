@@ -2,19 +2,19 @@ USE master;
 GO
 
 -- Create the database if it doesn't exist
-IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'TimesheetDB')
+IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'TimesheetDB1')
 BEGIN
-    CREATE DATABASE TimesheetDB;
-    PRINT '✅ TimesheetDB database created.';
+    CREATE DATABASE TimesheetDB1;
+    PRINT '✅ TimesheetDB1 database created.';
 END
 ELSE
 BEGIN
-    PRINT 'ℹ️ TimesheetDB database already exists.';
+    PRINT 'ℹ️ TimesheetDB1 database already exists.';
 END
 GO
 
 -- Switch to TimesheetDB
-USE TimesheetDB;
+USE TimesheetDB1;
 GO
 
 -- Create the stored procedure to recreate tables if not exists
