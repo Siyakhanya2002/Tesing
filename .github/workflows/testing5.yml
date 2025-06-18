@@ -22,7 +22,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Deploy TimesheetDB database
+    - name: Deploy TimesheetDB
       shell: cmd
       env:
         SQL_SERVER: ${{ secrets.SQL_SERVER }}
@@ -40,9 +40,12 @@ jobs:
         SQL_PASS: ${{ secrets.SQL_PASSWORD }}
         SSIS_FOLDER_NAME: ${{ env.SSIS_FOLDER_NAME }}
       run: |
-        sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -Q ^
-          "IF NOT EXISTS (SELECT * FROM SSISDB.catalog.folders WHERE name = '%SSIS_FOLDER_NAME%') ^
-           BEGIN EXEC catalog.create_folder @folder_name = '%SSIS_FOLDER_NAME%'; END"
+        echo USE SSISDB; > create_folder.sql
+        echo IF NOT EXISTS (SELECT * FROM catalog.folders WHERE name = '%SSIS_FOLDER_NAME%') >> create_folder.sql
+        echo BEGIN >> create_folder.sql
+        echo   EXEC catalog.create_folder @folder_name = '%SSIS_FOLDER_NAME%'; >> create_folder.sql
+        echo END >> create_folder.sql
+        sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -i create_folder.sql -l 60
 
     - name: Deploy SSIS Package (.ispac)
       shell: powershell
@@ -53,22 +56,23 @@ jobs:
         SSIS_FOLDER_NAME: ${{ env.SSIS_FOLDER_NAME }}
         SSIS_PROJECT_NAME: ${{ env.SSIS_PROJECT_NAME }}
       run: |
-        $ispac = "Database/bin/Development/Integration Services Project1.ispac"
-        if (!(Test-Path $ispac)) {
-          Write-Error "ISPAC not found at: $ispac"
+        $ispacPath = "Database/bin/Development/Integration Services Project1.ispac"
+        if (!(Test-Path $ispacPath)) {
+          Write-Error "ISPAC not found at: $ispacPath"
           exit 1
         }
-        $bytes = [System.IO.File]::ReadAllBytes($ispac)
-        $hex = [System.BitConverter]::ToString($bytes) -replace '-', ''
+        $projectBytes = [System.IO.File]::ReadAllBytes($ispacPath)
+        $hex = [System.BitConverter]::ToString($projectBytes) -replace '-', ''
         @"
         DECLARE @ispac VARBINARY(MAX) = 0x$hex;
-        DECLARE @op_id BIGINT;
+        DECLARE @operation_id BIGINT;
         EXEC SSISDB.catalog.deploy_project 
           @folder_name = N'$env:SSIS_FOLDER_NAME',
           @project_name = N'$env:SSIS_PROJECT_NAME',
           @project_stream = @ispac,
-          @operation_id = @op_id OUTPUT;
-        "@ | Out-File deploy.sql -Encoding utf8
+          @operation_id = @operation_id OUTPUT;
+        SELECT @operation_id AS operation_id;
+        "@ | Out-File deploy.sql -Encoding UTF8
         sqlcmd -S "$env:SQL_SERVER" -U "$env:SQL_USER" -P "$env:SQL_PASS" -i deploy.sql -l 60
 
     - name: Create SQL Agent Job
@@ -83,15 +87,15 @@ jobs:
         SQL_AGENT_JOB_NAME: ${{ env.SQL_AGENT_JOB_NAME }}
         EXCEL_PATH: ${{ secrets.EXCEL_PATH }}
       run: |
-        sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -Q ^
-        "USE msdb; ^
-         IF EXISTS (SELECT 1 FROM sysjobs WHERE name = '%SQL_AGENT_JOB_NAME%') ^
-           EXEC sp_delete_job @job_name = '%SQL_AGENT_JOB_NAME%'; ^
-         EXEC sp_add_job @job_name = N'%SQL_AGENT_JOB_NAME%'; ^
-         EXEC sp_add_jobstep @job_name = N'%SQL_AGENT_JOB_NAME%', ^
-             @step_name = N'Run SSIS Package', ^
-             @subsystem = N'SSIS', ^
-             @command = N'/ISSERVER \"\SSISDB\%SSIS_FOLDER_NAME%\%SSIS_PROJECT_NAME%\%SSIS_PACKAGE_NAME%\" /SERVER \"%SQL_SERVER%\" /Par \"ExcelFilePath\";\"%EXCEL_PATH%\"', ^
-             @database_name = N'master'; ^
-         EXEC sp_add_jobschedule @job_name = N'%SQL_AGENT_JOB_NAME%', @name = N'DailyRun', @freq_type = 4, @freq_interval = 1, @active_start_time = 010000; ^
-         EXEC sp_add_jobserver @job_name = N'%SQL_AGENT_JOB_NAME%';"
+        echo USE msdb; > create_job.sql
+        echo IF EXISTS (SELECT 1 FROM sysjobs WHERE name = '%SQL_AGENT_JOB_NAME%') BEGIN >> create_job.sql
+        echo   EXEC sp_delete_job @job_name = '%SQL_AGENT_JOB_NAME%'; >> create_job.sql
+        echo END >> create_job.sql
+        echo EXEC sp_add_job @job_name = N'%SQL_AGENT_JOB_NAME%', @enabled = 1, @description = N'Runs SSIS package daily'; >> create_job.sql
+        echo EXEC sp_add_jobstep @job_name = N'%SQL_AGENT_JOB_NAME%', @step_name = N'Run SSIS', >> create_job.sql
+        echo   @subsystem = N'SSIS', >> create_job.sql
+        echo   @command = N'/ISSERVER "\"\SSISDB\%SSIS_FOLDER_NAME%\%SSIS_PROJECT_NAME%\%SSIS_PACKAGE_NAME%\"" /SERVER "%SQL_SERVER%" /Par "ExcelFilePath";"%EXCEL_PATH%"', >> create_job.sql
+        echo   @database_name = N'master'; >> create_job.sql
+        echo EXEC sp_add_jobschedule @job_name = N'%SQL_AGENT_JOB_NAME%', @name = N'DailyRun', @freq_type = 4, @freq_interval = 1, @active_start_time = 010000; >> create_job.sql
+        echo EXEC sp_add_jobserver @job_name = N'%SQL_AGENT_JOB_NAME%'; >> create_job.sql
+        sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -i create_job.sql -l 60
