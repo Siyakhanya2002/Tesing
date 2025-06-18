@@ -5,7 +5,8 @@ on:
     branches:
       - main
     paths:
-      - 'Database/**'
+      - 'sql/**'
+      - 'Database/**'  # Include in case your repo uses Database/
   workflow_dispatch:  # Allows manual triggering
 
 jobs:
@@ -18,14 +19,28 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      - name: Confirm checkout
+      - name: Debug repository contents
         run: |
-          echo "Step 1: Checked out the repository containing sql/create_timesheetdb.sql"
-          ls -la sql/ || { echo "sql/ directory not found"; exit 1; }
-          if [ -f sql/create_timesheetdb.sql ]; then
-            echo "Found sql/create_timesheetdb.sql"
+          echo "Step 1: Debugging repository contents"
+          pwd  # Show current directory
+          ls -la  # List all files and folders
+          echo "Checking for sql/ directory"
+          if [ -d sql ]; then
+            ls -la sql/
+            if [ -f sql/create_timesheetdb.sql ]; then
+              echo "Found sql/create_timesheetdb.sql"
+            else
+              echo "Error: sql/create_timesheetdb.sql not found"
+              exit 1
+            fi
           else
-            echo "Error: sql/create_timesheetdb.sql not found"
+            echo "sql/ directory not found"
+            echo "Checking for Database/ directory"
+            if [ -d Database ]; then
+              ls -la Database/
+            else
+              echo "Database/ directory not found"
+            fi
             exit 1
           fi
 
@@ -34,14 +49,25 @@ jobs:
         run: |
           echo "Step 2: Installing sqlcmd on Ubuntu"
           sudo apt-get update
-          sudo apt-get install -y curl gnupg
-          curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
-          curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
+          sudo apt-get install -y curl gnupg lsb-release
+          # Clean up existing Microsoft repository files
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/msprod.list
+          # Add Microsoft GPG key
+          curl -sSL https://packages.microsoft.com/keys/microsoft.asc | sudo tee /usr/share/keyrings/microsoft-prod.gpg > /dev/null
+          # Add Microsoft repository dynamically
+          ubuntu_codename=$(lsb_release -cs)
+          echo "Detected Ubuntu codename: $ubuntu_codename"
+          curl -sSL https://packages.microsoft.com/config/ubuntu/$ubuntu_codename/prod.list | sudo tee /etc/apt/sources.list.d/microsoft-prod.list
+          # Update package lists
           sudo apt-get update
-          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools unixodbc-dev
-          echo "/opt/mssql-tools/bin" >> $GITHUB_PATH
+          # Install mssql-tools18 and unixodbc-dev
+          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
+          # Add sqlcmd to PATH
+          echo "/opt/mssql-tools18/bin" >> $GITHUB_PATH
           echo "sqlcmd version: $(sqlcmd -? | grep Version)"
           echo "Step 2 completed: sqlcmd installed"
+        env:
+          DEBIAN_FRONTEND: noninteractive
 
       # Step 3: Deploy database, table, stored procedure
       - name: Deploy TimesheetDB database
