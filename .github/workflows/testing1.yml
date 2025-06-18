@@ -39,10 +39,10 @@ jobs:
             Write-Host "Checking for Database/Packages/ directory"
             if (Test-Path -Path "Database/Packages") {
               Get-ChildItem -Path "Database/Packages"
-              if (Test-Path -Path "Database/Packages/TimesheetMigration.ispac") {
-                Write-Host "Found Database/Packages/TimesheetMigration.ispac"
+              if (Test-Path -Path "Database/bin/Development/Integration Services Project1.ispac") {
+                Write-Host "Found Database/bin/Development/Integration Services Project1.ispac"
               } else {
-                Write-Error "Database/Packages/TimesheetMigration.ispac not found"
+                Write-Error "Database/bin/Development/Integration Services Project1.ispac not found"
                 exit 1
               }
             } else {
