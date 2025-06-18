@@ -1,0 +1,72 @@
+name: TimesheetDB Creation Pipeline
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'sql/**'
+
+jobs:
+  deploy:
+    runs-on: self-hosted  # Ubuntu self-hosted runner
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Confirm checkout
+        run: |
+          echo "Step 1: Checked out the repository containing sql/create_timesheetdb.sql"
+
+      # Step 2: Install Microsoft SQL Server tools (sqlcmd)
+      - name: Install sqlcmd
+        run: |
+          echo "Step 2: Installing sqlcmd on Ubuntu"
+          sudo apt-get update
+          sudo apt-get install -y curl gnupg
+          curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+          curl https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools unixodbc-dev
+          echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bashrc
+          source ~/.bashrc
+          sqlcmd -? | grep Version
+          echo "Step 2 completed: sqlcmd installed"
+
+      # Step 3: Deploy TimesheetDB database
+      - name: Deploy TimesheetDB
+        run: |
+          echo "Step 3: Running sql/create_timesheetdb.sql"
+          sqlcmd -S ${{ secrets.SQL_SERVER }} -U ${{ secrets.SQL_USERNAME }} -P ${{ secrets.SQL_PASSWORD }} -i sql/create_timesheetdb.sql -l 60 -o sql_output.log
+          if [ $? -eq 0 ]; then
+            echo "Step 3 completed: SQL script executed successfully"
+            cat sql_output.log
+          else
+            echo "Step 3 failed: SQL script execution error"
+            cat sql_output.log
+            exit 1
+          fi
+        env:
+          SQL_SERVER: ${{ secrets.SQL_SERVER }}
+          SQL_USERNAME: ${{ secrets.SQL_USERNAME }}
+          SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
+
+      # Step 4: Verify deployment
+      - name: Verify TimesheetDB deployment
+        run: |
+          echo "Step 4: Verifying tables in TimesheetDB"
+          sqlcmd -S ${{ secrets.SQL_SERVER }} -U ${{ secrets.SQL_USERNAME }} -P ${{ secrets.SQL_PASSWORD }} -Q "USE TimesheetDB; SELECT name FROM sys.tables WHERE name IN ('Employee', 'Client', 'Project', 'ExpenseCategory', 'LeaveType', 'TimesheetEntry', 'ExpenseEntry', 'LeaveEntry');" -l 60 -o verify_output.log
+          if [ $? -eq 0 ]; then
+            echo "Step 4 completed: Verified tables in TimesheetDB"
+            cat verify_output.log
+          else
+            echo "Step 4 failed: Verification query error"
+            cat verify_output.log
+            exit 1
+          fi
+        env:
+          SQL_SERVER: ${{ secrets.SQL_SERVER }}
+          SQL_USERNAME: ${{ secrets.SQL_USERNAME }}
+          SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
