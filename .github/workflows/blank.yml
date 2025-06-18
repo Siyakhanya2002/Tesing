@@ -9,7 +9,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: self-hosted  # Ubuntu self-hosted runner
+    runs-on: ubuntu-latest   # Ubuntu self-hosted runner
     steps:
       # Step 1: Checkout the repository
       - name: Checkout repository
