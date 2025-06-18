@@ -9,10 +9,10 @@ on:
   workflow_dispatch:
 
 env:
-  SSIS_FOLDER_NAME: "Timesheet"
-  SSIS_PROJECT_NAME: "TimesheetMigration"
-  SSIS_PACKAGE_NAME: "MigrateExcelData.dtsx"
-  SQL_AGENT_JOB_NAME: "RunTimesheetMigration"
+  SSIS_FOLDER_NAME: Timesheet
+  SSIS_PROJECT_NAME: Integration Services Project1
+  SSIS_PACKAGE_NAME: MigrateExcelData.dtsx
+  SQL_AGENT_JOB_NAME: RunTimesheetMigration
 
 jobs:
   deploy-and-schedule:
@@ -22,7 +22,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       - name: Debug repository contents
-        shell: pwsh
+        shell: powershell
         run: |
           Write-Host "Step 1: Debugging repository contents"
           Get-Location
@@ -36,9 +36,9 @@ jobs:
               Write-Error "Database/create_timesheetdb.sql not found"
               exit 1
             }
-            Write-Host "Checking for Database/Packages/ directory"
-            if (Test-Path -Path "Database/Packages") {
-              Get-ChildItem -Path "Database/Packages"
+            Write-Host "Checking for Database/bin/Development/ directory"
+            if (Test-Path -Path "Database/bin/Development") {
+              Get-ChildItem -Path "Database/bin/Development"
               if (Test-Path -Path "Database/bin/Development/Integration Services Project1.ispac") {
                 Write-Host "Found Database/bin/Development/Integration Services Project1.ispac"
               } else {
@@ -46,7 +46,7 @@ jobs:
                 exit 1
               }
             } else {
-              Write-Error "Database/Packages/ directory not found"
+              Write-Error "Database/bin/Development/ directory not found"
               exit 1
             }
           } else {
@@ -62,7 +62,7 @@ jobs:
           SQL_USER: ${{ secrets.SQL_USERNAME }}
           SQL_PASS: ${{ secrets.SQL_PASSWORD }}
         run: |
-          echo "Step 2: Running Database/create_timesheetdb.sql"
+          echo "Step 2: Running Database\create_timesheetdb.sql"
           sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -i "Database\create_timesheetdb.sql" -l 60 > sql_output.log 2>&1
           if %ERRORLEVEL% equ 0 (
             echo "Step 2 completed: SQL script executed"
@@ -99,8 +99,9 @@ jobs:
           SQL_SERVER: ${{ secrets.SQL_SERVER }}
           SQL_USER: ${{ secrets.SQL_USERNAME }}
           SQL_PASS: ${{ secrets.SQL_PASSWORD }}
+          SSIS_FOLDER_NAME: ${{ env.SSIS_FOLDER_NAME }}
         run: |
-          echo "Step 4: Creating SSISDB catalog and Timesheet folder"
+          echo "Step 4: Creating SSISDB catalog and %SSIS_FOLDER_NAME% folder"
           sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -Q ^
             "IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'SSISDB') BEGIN ^
                 EXEC msdb.dbo.sp_addlogin @loginame = 'SSISDBOwner', @passwd = 'StrongPassword123!', @defdb = 'SSISDB'; ^
@@ -114,7 +115,7 @@ jobs:
                 EXEC catalog.create_folder @folder_name = '%SSIS_FOLDER_NAME%'; ^
             END" -l 60 > ssisdb_output.log 2>&1
           if %ERRORLEVEL% equ 0 (
-            echo "Step 4 completed: SSISDB catalog and Timesheet folder created"
+            echo "Step 4 completed: SSISDB catalog and %SSIS_FOLDER_NAME% folder created"
             type ssisdb_output.log
           ) else (
             echo "Step 4 failed: SSISDB creation error"
@@ -124,7 +125,7 @@ jobs:
 
       # Step 5: Deploy SSIS package
       - name: Deploy SSIS package
-        shell: pwsh
+        shell: powershell
         env:
           SQL_SERVER: ${{ secrets.SQL_SERVER }}
           SQL_USER: ${{ secrets.SQL_USERNAME }}
@@ -132,8 +133,8 @@ jobs:
           SSIS_FOLDER_NAME: ${{ env.SSIS_FOLDER_NAME }}
           SSIS_PROJECT_NAME: ${{ env.SSIS_PROJECT_NAME }}
         run: |
-          Write-Host "Step 5: Deploying TimesheetMigration.ispac"
-          $ispacPath = "Database/Packages/TimesheetMigration.ispac"
+          Write-Host "Step 5: Deploying Integration Services Project1.ispac"
+          $ispacPath = "Database/bin/Development/Integration Services Project1.ispac"
           if (-not (Test-Path $ispacPath)) {
             Write-Error "ISPAC file not found at: $ispacPath"
             exit 1
@@ -141,15 +142,18 @@ jobs:
           $projectBytes = [System.IO.File]::ReadAllBytes($ispacPath)
           $hexString = [System.BitConverter]::ToString($projectBytes) -replace '-',''
           $deploySql = @"
-          USE SSISDB;
-          DECLARE @folder_name NVARCHAR(128) = '$env:SSIS_FOLDER_NAME';
-          DECLARE @project_name NVARCHAR(128) = '$env:SSIS_PROJECT_NAME';
-          DECLARE @project_stream VARBINARY(MAX) = 0x$hexString;
-          IF NOT EXISTS (SELECT 1 FROM catalog.folders WHERE name = @folder_name)
+          DECLARE @ispac_binary VARBINARY(MAX) = 0x$hexString;
+          DECLARE @operation_id BIGINT;
+          EXEC SSISDB.catalog.deploy_project 
+              @folder_name = N'$env:SSIS_FOLDER_NAME',
+              @project_name = N'$env:SSIS_PROJECT_NAME',
+              @project_stream = @ispac_binary,
+              @operation_id = @operation_id OUTPUT;
+          SELECT @operation_id AS operation_id;
+          IF EXISTS (SELECT * FROM SSISDB.catalog.operation_messages WHERE operation_id = @operation_id AND message_type = 120)
           BEGIN
-              EXEC catalog.create_folder @folder_name;
+              RAISERROR ('Deployment failed. Check SSISDB.catalog.operation_messages for details.', 16, 1);
           END
-          EXEC catalog.deploy_project @folder_name, @project_name, @project_stream;
           "@
           $deploySql | Out-File -FilePath "deploy_ssis.sql" -Encoding UTF8
           sqlcmd -S "$env:SQL_SERVER" -U "$env:SQL_USER" -P "$env:SQL_PASS" -i "deploy_ssis.sql" -l 60 > deploy_output.log 2>&1
@@ -162,9 +166,9 @@ jobs:
             exit $LASTEXITCODE
           }
 
-      # Step 6: Create or update SQL Agent job
-      - name: Create or update SQL Agent job
-        shell: pwsh
+      # Step 6: Create SQL Agent job
+      - name: Create SQL Agent job
+        shell: cmd
         env:
           SQL_SERVER: ${{ secrets.SQL_SERVER }}
           SQL_USER: ${{ secrets.SQL_USERNAME }}
@@ -175,41 +179,37 @@ jobs:
           SQL_AGENT_JOB_NAME: ${{ env.SQL_AGENT_JOB_NAME }}
           EXCEL_PATH: ${{ secrets.EXCEL_PATH }}
         run: |
-          Write-Host "Step 6: Creating or updating SQL Agent job"
-          $jobScript = @"
-          USE msdb;
-          IF EXISTS (SELECT 1 FROM sysjobs WHERE name = '$env:SQL_AGENT_JOB_NAME')
-          BEGIN
-              EXEC sp_delete_job @job_name = '$env:SQL_AGENT_JOB_NAME';
-          END
-          EXEC dbo.sp_add_job
-              @job_name = N'$env:SQL_AGENT_JOB_NAME',
-              @enabled = 1,
-              @description = N'Runs TimesheetMigration SSIS package daily';
-          EXEC dbo.sp_add_jobstep
-              @job_name = N'$env:SQL_AGENT_JOB_NAME',
-              @step_name = N'Execute MigrateExcelData',
-              @subsystem = N'SSIS',
-              @command = N'/ISSERVER "\"\SSISDB\$env:SSIS_FOLDER_NAME\$env:SSIS_PROJECT_NAME\$env:SSIS_PACKAGE_NAME\"" /SERVER \"$env:SQL_SERVER\" /Par "\"ExcelFilePath\"";\"$env:EXCEL_PATH\" /Par "\"$ServerOption::LOGGING_LEVEL(Int16)\"";1 /Par "\"$ServerOption::SYNCHRONIZED(Boolean)\"";True /CALLERINFO SQLAGENT /REPORTING E',
-              @database_name = N'master';
-          EXEC dbo.sp_add_jobschedule
-              @job_name = N'$env:SQL_AGENT_JOB_NAME',
-              @name = N'DailySchedule',
-              @enabled = 1,
-              @freq_type = 4,  -- Daily
-              @freq_interval = 1,
-              @active_start_date = $(Get-Date -Format yyyyMMdd),
-              @active_start_time = 010000;  -- 1:00 AM
-          EXEC dbo.sp_add_jobserver
-              @job_name = N'$env:SQL_AGENT_JOB_NAME';
-          "@
-          $jobScript | Out-File -FilePath "setup_job.sql" -Encoding UTF8
-          sqlcmd -S "$env:SQL_SERVER" -U "$env:SQL_USER" -P "$env:SQL_PASS" -i "setup_job.sql" -l 60 > job_output.log 2>&1
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Step 6 completed: SQL Agent job created"
-            Get-Content job_output.log
-          } else {
-            Write-Host "Step 6 failed: SQL Agent job error"
-            Get-Content job_output.log
-            exit $LASTEXITCODE
-          }
+          echo "Step 6: Creating SQL Agent job %SQL_AGENT_JOB_NAME%"
+          sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -Q ^
+            "USE msdb; ^
+            IF EXISTS (SELECT 1 FROM sysjobs WHERE name = '%SQL_AGENT_JOB_NAME%') BEGIN ^
+                EXEC sp_delete_job @job_name = '%SQL_AGENT_JOB_NAME%'; ^
+            END ^
+            EXEC dbo.sp_add_job ^
+                @job_name = N'%SQL_AGENT_JOB_NAME%', ^
+                @enabled = 1, ^
+                @description = N'Runs Integration Services Project1 SSIS package daily'; ^
+            EXEC dbo.sp_add_jobstep ^
+                @job_name = N'%SQL_AGENT_JOB_NAME%', ^
+                @step_name = N'Execute %SSIS_PACKAGE_NAME%', ^
+                @subsystem = N'SSIS', ^
+                @command = N'/ISSERVER \"\SSISDB\%SSIS_FOLDER_NAME%\%SSIS_PROJECT_NAME%\%SSIS_PACKAGE_NAME%\" /SERVER \"%SQL_SERVER%\" /Par \"ExcelFilePath\";\"%EXCEL_PATH%\"', ^
+                @database_name = N'master'; ^
+            EXEC dbo.sp_add_jobschedule ^
+                @job_name = N'%SQL_AGENT_JOB_NAME%', ^
+                @name = N'DailySchedule', ^
+                @enabled = 1, ^
+                @freq_type = 4, ^
+                @freq_interval = 1, ^
+                @active_start_date = 20250618, ^
+                @active_start_time = 010000; ^
+            EXEC dbo.sp_add_jobserver ^
+                @job_name = N'%SQL_AGENT_JOB_NAME%';" -l 60 > job_output.log 2>&1
+          if %ERRORLEVEL% equ 0 (
+            echo "Step 6 completed: SQL Agent job created"
+            type job_output.log
+          ) else (
+            echo "Step 6 failed: SQL Agent job error"
+            type job_output.log
+            exit /b %ERRORLEVEL%
+          )
