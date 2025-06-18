@@ -1,7 +1,7 @@
 USE master;
 GO
 
-IF OBJECT_ID('dbo.usp_CreateTimesheetDB', 'P') IS NOT NULL
+IF OBJECT_ID('dbo.usp_CreateTimesheetDB', 'P') IS NOT NULL --Comment
     DROP PROCEDURE dbo.usp_CreateTimesheetDB;
 GO
 
