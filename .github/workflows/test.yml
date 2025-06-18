@@ -41,5 +41,5 @@ jobs:
           SQL_USERNAME: ${{ secrets.SQL_USERNAME }}
           SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
         run: |
-          /opt/mssql-tools/bin/sqlcmd -S $SQL_SERVER -U $SQL_USERNAME -P $SQL_PASSWORD  -i Timesheet/SqlScripts/CreateDatabaseProject.sql -o output.txt
+          /opt/mssql-tools/bin/sqlcmd -S $SQL_SERVER -U $SQL_USERNAME -P $SQL_PASSWORD  -i Database -o output.txt
           cat output.txt
