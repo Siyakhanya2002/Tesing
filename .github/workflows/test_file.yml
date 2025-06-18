@@ -48,12 +48,13 @@ jobs:
           # Add Microsoft GPG key
           curl -sSL https://packages.microsoft.com/keys/microsoft.asc | sudo tee /usr/share/keyrings/microsoft-prod.gpg > /dev/null
           # Add Microsoft repository with fallback
-          ubuntu_codename=$(lsb_release -cs)
-          echo "Detected Ubuntu codename: $ubuntu_codename"
+          ubuntu_codename="jammy"  # Start with Ubuntu 22.04
+          echo "Using Ubuntu codename: $ubuntu_codename"
           repo_url="https://packages.microsoft.com/config/ubuntu/$ubuntu_codename/prod.list"
           if ! curl -sSL -o /tmp/microsoft-prod.list "$repo_url"; then
-            echo "Warning: Failed to fetch $repo_url, trying Ubuntu 22.04 (jammy)"
-            repo_url="https://packages.microsoft.com/config/ubuntu/22.04/prod.list"
+            echo "Warning: Failed to fetch $repo_url, trying Ubuntu 20.04 (focal)"
+            ubuntu_codename="focal"
+            repo_url="https://packages.microsoft.com/config/ubuntu/$ubuntu_codename/prod.list"
             curl -sSL -o /tmp/microsoft-prod.list "$repo_url" || { echo "Error: Failed to fetch $repo_url"; exit 1; }
           fi
           # Validate repository file
