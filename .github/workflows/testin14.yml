@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 env:
-  SSIS_FOLDER_NAME: Timesheet
+  SSIS_FOLDER_NAME: MySSISPackages
   SSIS_PROJECT_NAME: Integration Services Project1
   SSIS_PACKAGE_NAME: MigrateExcelData.dtsx
   SQL_AGENT_JOB_NAME: RunTimesheetMigration
@@ -30,7 +30,7 @@ jobs:
       run: |
         sqlcmd -S "%SQL_SERVER%" -E -i "Database\create_timesheetdb.sql"
 
-    # Create SSISDB folder
+    # Create SSISDB folder if not exists
     - name: Create SSIS folder if not exists
       shell: cmd
       env:
@@ -44,7 +44,7 @@ jobs:
         echo END >> create_folder.sql
         sqlcmd -S "%SQL_SERVER%" -E -i create_folder.sql
 
-    # Check if ISPAC exists
+    # Validate ISPAC file exists
     - name: Validate ISPAC file exists
       shell: cmd
       run: |
@@ -53,21 +53,22 @@ jobs:
           exit /b 1
         )
 
-    # Deploy SSIS package using ISDeploymentWizard
+    # Deploy SSIS package using ISDeploymentWizard.exe
     - name: Deploy SSIS package
       shell: cmd
-      env:
-        SQL_SERVER: ${{ secrets.SQL_SERVER }}
-        SSIS_FOLDER_NAME: ${{ env.SSIS_FOLDER_NAME }}
-        SSIS_PROJECT_NAME: ${{ env.SSIS_PROJECT_NAME }}
       run: |
-        echo Deploying SSIS package using ISDeploymentWizard...
-        "C:\Program Files\Microsoft SQL Server\160\DTS\Binn\ISDeploymentWizard.exe" ^
-         /Silent ^
-         /SourcePath:"Database\bin\Development\Integration Services Project1.ispac" ^
-        /DestinationServer:"%SQL_SERVER%" ^
-        /DestinationPath:"\SSISDB\Timesheet\Integration Services Project1"
-          
+        set WIZARD="C:\Program Files\Microsoft SQL Server\160\DTS\Binn\ISDeploymentWizard.exe"
+        if not exist %WIZARD% (
+          echo ERROR: ISDeploymentWizard not found at %WIZARD%
+          exit /b 1
+        )
+
+        echo Deploying SSIS package using ISDeploymentWizard.exe...
+        %WIZARD% ^
+          /Silent ^
+          /SourcePath:"Database\bin\Development\Integration Services Project1.ispac" ^
+          /DestinationServer:"SAMBE2025017" ^
+          /DestinationPath:"\SSISDB\MySSISPackages\Integration Services Project1"
 
     # Create SQL Agent Job to run the package
     - name: Create SQL Agent Job
