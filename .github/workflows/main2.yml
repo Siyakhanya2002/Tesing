@@ -7,7 +7,7 @@ on:
   pull_request:
     branches:
       - main
-  workflow_dispatch: # Added to allow manual triggering
+  workflow_dispatch:
 
 jobs:
   build-db:
@@ -39,14 +39,3 @@ jobs:
         run: |
           /opt/mssql-tools/bin/sqlcmd -S $SQL_SERVER -U $SQL_USERNAME -P $SQL_PASSWORD -i Database/create_timesheetdb.sql -o output.txt
           cat output.txt
-
-  trigger-ssis-deploy:
-    needs: build-db
-    runs-on: ubuntu-latest
-    steps:
-      - name: Dispatch SSIS Deploy Workflow
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh workflow run "Deploy SSIS Project and Create Scheduled Jobs" --repo ${{ github.repository }}
-        shell: bash
