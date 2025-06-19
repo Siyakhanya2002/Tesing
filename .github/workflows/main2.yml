@@ -11,31 +11,55 @@ on:
 
 jobs:
   build-db:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, windows]
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Install SQL Server tools
+      - name: Install SQL Server command-line tools
+        shell: powershell
         run: |
-          sudo apt-get update
-          sudo apt-get install -y curl gnupg apt-transport-https
-          curl https://packages.microsoft.com/keys/microsoft.asc | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc
-          curl https://packages.microsoft.com/config/ubuntu/22.04/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
-          sudo apt-get update
-          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools unixodbc-dev
-          echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bashrc
-          echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.profile
-          echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bash_profile
-          source ~/.bashrc
-          /opt/mssql-tools/bin/sqlcmd -? || echo "sqlcmd installation failed"
+          # Check if sqlcmd is already installed
+          $sqlcmdPath = "C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\sqlcmd.exe"
+          if (Test-Path $sqlcmdPath) {
+            Write-Host "sqlcmd is already installed at $sqlcmdPath"
+          } else {
+            Write-Host "Installing SQL Server command-line tools..."
+            # Download and install SQL Server command-line tools (mssql-tools)
+            $installerUrl = "https://go.microsoft.com/fwlink/?linkid=2243102" # Latest mssql-tools for Windows as of 2025
+            $installerPath = "$env:TEMP\mssql-tools-installer.exe"
+            Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath
+            # Install silently, accepting EULA
+            Start-Process -FilePath $installerPath -ArgumentList "/quiet /iacceptsqlserverlicenseterms" -Wait
+            # Verify installation
+            if (!(Test-Path $sqlcmdPath)) {
+              Write-Error "sqlcmd installation failed"
+              exit 1
+            }
+            Write-Host "sqlcmd installed successfully"
+          }
+          # Add sqlcmd to PATH for this session
+          $env:PATH += ";C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn"
+          # Verify sqlcmd is accessible
+          sqlcmd -? | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "sqlcmd is not accessible"
+            exit 1
+          }
 
       - name: Run SQL script
         env:
           SQL_SERVER: ${{ secrets.SQL_SERVER }}
           SQL_USERNAME: ${{ secrets.SQL_USERNAME }}
           SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
+        shell: powershell
         run: |
-          /opt/mssql-tools/bin/sqlcmd -S $SQL_SERVER -U $SQL_USERNAME -P $SQL_PASSWORD -i Database/create_timesheetdb.sql -o output.txt
-          cat output.txt
+          Write-Host "Running SQL script..."
+          sqlcmd -S $env:SQL_SERVER -U $env:SQL_USERNAME -P $env:SQL_PASSWORD -i Database/create_timesheetdb.sql -o output.txt
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "SQL script execution failed"
+            cat output.txt
+            exit $LASTEXITCODE
+          }
+          Get-Content output.txt
