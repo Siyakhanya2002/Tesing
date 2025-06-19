@@ -1,22 +1,21 @@
-CREATE PROCEDURE CreateTimesheetDB
+-- Drop TimesheetDB if it exists
+IF EXISTS (SELECT name FROM sys.databases WHERE name = N'TimesheetDB')
+BEGIN
+    ALTER DATABASE TimesheetDB SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+    DROP DATABASE TimesheetDB;
+    PRINT 'TimesheetDB database dropped.';
+END
+
+-- Create TimesheetDB
+CREATE DATABASE TimesheetDB;
+PRINT 'TimesheetDB database created.';
+GO
+
+CREATE OR ALTER PROCEDURE CreateTimesheetDB
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- Check if TimesheetDB database exists, create if it doesn't
-    IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'TimesheetDB')
-    BEGIN
-        EXEC('CREATE DATABASE TimesheetDB');
-        PRINT 'TimesheetDB database created.';
-    END
-    ELSE
-    BEGIN
-        PRINT 'TimesheetDB database already exists.';
-    END
-
-    -- Use TimesheetDB database
-    USE TimesheetDB;
-    
     -- Create AuditLog1 table
     IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[AuditLog1]') AND type in (N'U'))
     BEGIN
