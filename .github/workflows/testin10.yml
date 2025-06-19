@@ -67,8 +67,7 @@ jobs:
           /SourcePath:"Database\bin\Development\Integration Services Project1.ispac" ^
           /DestinationServer:"%SQL_SERVER%" ^
           /DestinationPath:"\SSISDB\MySSISPackages\Integration Services Project1" ^
-          /ProjectName:"Integration Services Project1" ^
-          /Overwrite
+          
 
     # Create SQL Agent Job to run the package
     - name: Create SQL Agent Job
