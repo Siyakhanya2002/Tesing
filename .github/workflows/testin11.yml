@@ -64,9 +64,11 @@ jobs:
         echo Deploying SSIS package using ISDeploymentWizard...
         "C:\Program Files\Microsoft SQL Server\160\DTS\Binn\ISDeploymentWizard.exe" ^
           /Silent ^
-          /SourcePath:"Database\bin\Development\Integration Services Project1.ispac" ^
-          /DestinationServer:"%SQL_SERVER%" ^
+          /SourcePath:"C:\Path\To\Database\bin\Development\Integration Services Project1.ispac" ^
+          /DestinationServer:"localhost" ^
           /DestinationPath:"\SSISDB\Timesheet\Integration Services Project1" ^
+          /ProjectName:"Integration Services Project1" ^
+          /Overwrite
           
 
     # Create SQL Agent Job to run the package
