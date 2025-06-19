@@ -70,86 +70,14 @@ jobs:
           Write-Host "SSIS project deployed successfully."
           Get-Content deploy_output.txt
 
-      - name: Execute SSIS Packages Directly
+      - name: Create SQL Agent Jobs with Recurring Schedule
         env:
           SQL_SERVER: ${{ secrets.SQL_SERVER }}
           SQL_USERNAME: ${{ secrets.SQL_USERNAME }}
           SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
         shell: powershell
         run: |
-          Write-Host "Executing SSIS packages directly in SSMS..."
-          $packages = @(
-            "Stg_Months",
-            "Load_stg_Leave",
-            "ImportLeaveType",
-            "ImportClient",
-            "ImportEmployee",
-            "ImportProject"
-          )
-
-          foreach ($pkg in $packages) {
-            Write-Host "Executing package: $pkg"
-            $execScript = "
-            DECLARE @execution_id bigint;
-            EXEC SSISDB.catalog.create_execution
-                @folder_name = 'MySSISPackages',
-                @project_name = 'Integration Services Project1',
-                @package_name = '$pkg.dtsx',
-                @execution_id = @execution_id OUTPUT;
-            EXEC SSISDB.catalog.start_execution @execution_id;
-            -- Wait for execution to complete
-            DECLARE @status int;
-            WHILE (SELECT status FROM SSISDB.catalog.executions WHERE execution_id = @execution_id) IN (1, 2, 4, 8)
-            BEGIN
-                WAITFOR DELAY '00:00:05';
-            END
-            SELECT @status = status FROM SSISDB.catalog.executions WHERE execution_id = @execution_id;
-            IF @status <> 7
-            BEGIN
-                DECLARE @error_message nvarchar(max);
-                SELECT @error_message = message
-                FROM SSISDB.catalog.event_messages
-                WHERE operation_id = @execution_id
-                AND message_type IN (120, 130)
-                ORDER BY event_message_id DESC;
-                RAISERROR ('Package $pkg failed with status %d: %s', 16, 1, @status, @error_message);
-            END
-            "
-            try {
-              Invoke-Sqlcmd -ServerInstance $env:SQL_SERVER -Username $env:SQL_USERNAME -Password $env:SQL_PASSWORD -Query $execScript -ErrorAction Stop
-              Write-Host "Package $pkg executed successfully."
-            } catch {
-              Write-Error "Failed to execute package ${pkg}: $($_.Exception.Message)"
-              $errorQuery = "
-              SELECT message
-              FROM SSISDB.catalog.event_messages
-              WHERE operation_id = (SELECT MAX(execution_id) FROM SSISDB.catalog.executions WHERE package_name = '$pkg.dtsx')
-              AND message_type IN (120, 130)
-              ORDER BY event_message_id DESC;
-              "
-              try {
-                $errorDetails = Invoke-Sqlcmd -ServerInstance $env:SQL_SERVER -Username $env:SQL_USERNAME -Password $env:SQL_PASSWORD -Query $errorQuery
-                Write-Host "SSIS error details: $($errorDetails.message)"
-              } catch {
-                Write-Host "Failed to retrieve SSIS error details: $($_.Exception.Message)"
-              }
-              exit 1
-            }
-          }
-          Write-Host "All SSIS packages executed successfully."
-
-      - name: Create SQL Agent Jobs with One-Time Schedule
-        env:
-          SQL_SERVER: ${{ secrets.SQL_SERVER }}
-          SQL_USERNAME: ${{ secrets.SQL_USERNAME }}
-          SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
-        shell: powershell
-        run: |
-          Write-Host "Creating SQL Agent Jobs to run 2 minutes from now..."
-
-          # Calculate start time (2 minutes from current time)
-          $startTime = (Get-Date).AddMinutes(2).ToString("HHmmss")
-          $startDate = (Get-Date).ToString("yyyyMMdd")
+          Write-Host "Creating SQL Agent Jobs to run every 2 minutes..."
 
           $packages = @(
             "Stg_Months",
@@ -161,8 +89,8 @@ jobs:
           )
 
           foreach ($pkg in $packages) {
-            $jobName = "RunSSIS_$pkg"
-            $scheduleName = "OneTime_2Min_$pkg"
+            $jobName = "RunSSIS_${pkg}"
+            $scheduleName = "Every2Min_${pkg}"
 
             $jobScript = "
             USE msdb;
@@ -181,7 +109,7 @@ jobs:
               @job_name = '$jobName',
               @step_name = 'Run SSIS Package',
               @subsystem = 'SSIS',
-              @command = '/ISSERVER ""SSISDB\\MySSISPackages\\Integration Services Project1\\$pkg.dtsx"" /SERVER ""$env:SQL_SERVER""',
+              @command = '/ISSERVER ""SSISDB\\MySSISPackages\\Integration Services Project1\\${pkg}.dtsx"" /SERVER ""$env:SQL_SERVER""',
               @on_success_action = 1,
               @database_name = 'SSISDB';
 
@@ -189,9 +117,12 @@ jobs:
             EXEC msdb.dbo.sp_add_schedule
               @schedule_name = '$scheduleName',
               @enabled = 1,
-              @freq_type = 1, -- One-time
-              @active_start_date = $startDate,
-              @active_start_time = $startTime,
+              @freq_type = 4, -- Daily
+              @freq_interval = 1, -- Every day
+              @freq_subday_type = 4, -- Minutes
+              @freq_subday_interval = 2, -- Every 2 minutes
+              @active_start_date = CONVERT(VARCHAR(8), GETDATE(), 112), -- Today
+              @active_start_time = REPLACE(CONVERT(VARCHAR(8), GETDATE(), 108), ':', ''), -- Now
               @schedule_id = @schedule_id OUTPUT;
 
             EXEC msdb.dbo.sp_attach_schedule
@@ -204,10 +135,10 @@ jobs:
 
             try {
               Invoke-Sqlcmd -ServerInstance $env:SQL_SERVER -Username $env:SQL_USERNAME -Password $env:SQL_PASSWORD -Query $jobScript -ErrorAction Stop
-              Write-Host "Created job $jobName to run at $startTime on $startDate for package: $pkg"
+              Write-Host "Created job $jobName to run every 2 minutes for package: ${pkg}"
             } catch {
               Write-Error "Failed to create job for package ${pkg}: $($_.Exception.Message)"
               exit 1
             }
           }
-          Write-Host "All SQL Agent jobs created with one-time schedule (2 minutes from now)."
+          Write-Host "All SQL Agent jobs created with recurring 2-minute schedule."
