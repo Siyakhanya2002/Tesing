@@ -29,7 +29,6 @@ jobs:
         SQL_SERVER: ${{ secrets.SQL_SERVER }}
       run: |
         sqlcmd -S "%SQL_SERVER%" -E -i "Database\create_timesheetdb.sql"
-
     # Create SSISDB folder if not exists
     - name: Create SSIS folder if not exists
       shell: cmd
@@ -43,7 +42,6 @@ jobs:
         echo   EXEC catalog.create_folder @folder_name = '%SSIS_FOLDER_NAME%'; >> create_folder.sql
         echo END >> create_folder.sql
         sqlcmd -S "%SQL_SERVER%" -E -i create_folder.sql
-
     # Validate ISPAC file exists
     - name: Validate ISPAC file exists
       shell: cmd
@@ -52,24 +50,39 @@ jobs:
           echo ERROR: ISPAC file not found!
           exit /b 1
         )
-
     # Deploy SSIS package using ISDeploymentWizard.exe
     - name: Deploy SSIS package
       shell: cmd
+      env:
+        SQL_SERVER: ${{ secrets.SQL_SERVER }}
+        SSIS_FOLDER_NAME: ${{ env.SSIS_FOLDER_NAME }}
+        SSIS_PROJECT_NAME: ${{ env.SSIS_PROJECT_NAME }}
       run: |
         set WIZARD="C:\Program Files\Microsoft SQL Server\160\DTS\Binn\ISDeploymentWizard.exe"
         if not exist %WIZARD% (
           echo ERROR: ISDeploymentWizard not found at %WIZARD%
           exit /b 1
         )
-
+        if not exist "Database\bin\Development\Integration Services Project1.ispac" (
+          echo ERROR: ISPAC file not found!
+          exit /b 1
+        )
+        echo Testing SQL Server connectivity...
+        sqlcmd -S "%SQL_SERVER%" -E -Q "SELECT @@VERSION" || (
+          echo ERROR: Failed to connect to SQL Server
+          exit /b 1
+        )
         echo Deploying SSIS package using ISDeploymentWizard.exe...
         %WIZARD% ^
-          /Silent ^
           /SourcePath:"Database\bin\Development\Integration Services Project1.ispac" ^
-          /DestinationServer:"SAMBE2025017" ^
-          /DestinationPath:"\SSISDB\MySSISPackages\Integration Services Project1"
-
+          /DestinationServer:"%SQL_SERVER%" ^
+          /DestinationPath:"/SSISDB/%SSIS_FOLDER_NAME%/%SSIS_PROJECT_NAME%" > deploy_log.txt 2>&1
+        if %ERRORLEVEL% neq 0 (
+          echo ERROR: SSIS deployment failed. See deploy_log.txt for details.
+          type deploy_log.txt
+          exit /b 1
+        )
+        echo SSIS package deployed successfully.
     # Create SQL Agent Job to run the package
     - name: Create SQL Agent Job
       shell: cmd
