@@ -29,10 +29,9 @@ jobs:
         SQL_USER: ${{ secrets.SQL_USERNAME }}
         SQL_PASS: ${{ secrets.SQL_PASSWORD }}
       run: |
-        echo Running SQL script to deploy TimesheetDB...
-        sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -i "Database\create_timesheetdb.sql" -l 60
+        sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -i "Database\create_timesheetdb.sql"
 
-    - name: Create SSISDB folder if not exists
+    - name: Create SSIS folder if not exists
       shell: cmd
       env:
         SQL_SERVER: ${{ secrets.SQL_SERVER }}
@@ -45,21 +44,33 @@ jobs:
         echo BEGIN >> create_folder.sql
         echo   EXEC catalog.create_folder @folder_name = '%SSIS_FOLDER_NAME%'; >> create_folder.sql
         echo END >> create_folder.sql
-        sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -i create_folder.sql -l 60
+        sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -i create_folder.sql
 
-    - name: Deploy SSIS Package using ISDeploymentWizard
+    - name: Convert ISPAC to Hex and Deploy to SSISDB
       shell: cmd
       env:
         SQL_SERVER: ${{ secrets.SQL_SERVER }}
-        SSIS_PROJECT_NAME: ${{ env.SSIS_PROJECT_NAME }}
+        SQL_USER: ${{ secrets.SQL_USERNAME }}
+        SQL_PASS: ${{ secrets.SQL_PASSWORD }}
         SSIS_FOLDER_NAME: ${{ env.SSIS_FOLDER_NAME }}
+        SSIS_PROJECT_NAME: ${{ env.SSIS_PROJECT_NAME }}
       run: |
-        echo Deploying SSIS package using ISDeploymentWizard...
-        "C:\Program Files (x86)\Microsoft SQL Server\150\DTS\Binn\ISDeploymentWizard.exe" ^
-          /Silent ^
-          /SourcePath:"Database\bin\Development\Integration Services Project1.ispac" ^
-          /DestinationServer:"%SQL_SERVER%" ^
-          /DestinationPath:"\SSISDB\%SSIS_FOLDER_NAME%"
+        certutil -encodehex "Database\bin\Development\Integration Services Project1.ispac" ispac.hex 0x30
+        echo SET NOCOUNT ON; > deploy_ssis.sql
+        echo DECLARE @ispac_binary VARBINARY(MAX); >> deploy_ssis.sql
+        echo SET @ispac_binary = 0x >> deploy_ssis.sql
+        for /F "tokens=* usebackq" %%A in (`type ispac.hex`) do (
+          echo %%A >> deploy_ssis.sql
+        )
+        echo ; >> deploy_ssis.sql
+        echo DECLARE @operation_id BIGINT; >> deploy_ssis.sql
+        echo EXEC SSISDB.catalog.deploy_project >> deploy_ssis.sql
+        echo   @folder_name = N'%SSIS_FOLDER_NAME%', >> deploy_ssis.sql
+        echo   @project_name = N'%SSIS_PROJECT_NAME%', >> deploy_ssis.sql
+        echo   @project_stream = @ispac_binary, >> deploy_ssis.sql
+        echo   @operation_id = @operation_id OUTPUT; >> deploy_ssis.sql
+        echo SELECT @operation_id AS OperationID; >> deploy_ssis.sql
+        sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -i deploy_ssis.sql
 
     - name: Create SQL Agent Job
       shell: cmd
@@ -84,4 +95,4 @@ jobs:
         echo   @database_name = N'master'; >> create_job.sql
         echo EXEC sp_add_jobschedule @job_name = N'%SQL_AGENT_JOB_NAME%', @name = N'DailyRun', @freq_type = 4, @freq_interval = 1, @active_start_time = 010000; >> create_job.sql
         echo EXEC sp_add_jobserver @job_name = N'%SQL_AGENT_JOB_NAME%'; >> create_job.sql
-        sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -i create_job.sql -l 60
+        sqlcmd -S "%SQL_SERVER%" -U "%SQL_USER%" -P "%SQL_PASS%" -i create_job.sql
