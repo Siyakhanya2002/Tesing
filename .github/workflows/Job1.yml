@@ -1,4 +1,4 @@
-name: Deploy SSIS Project and Schedule Job
+name: Deploy SSIS Project and Create Scheduled Jobs
 
 on:
   workflow_dispatch:
@@ -44,54 +44,64 @@ jobs:
 
           echo "SSIS project deployed successfully."
 
-      - name: Create SQL Agent Job with Schedule
+      - name: Create SQL Agent Jobs with Schedule
         env:
           SQL_SERVER: ${{ secrets.SQL_SERVER }}
         shell: powershell
         run: |
-          echo "Creating SQL Server Agent Job..."
+          echo "Creating multiple SQL Agent Jobs..."
 
-          $jobScript = "
-          USE msdb;
+          $packages = @(
+            "Stg_Months",
+            "Load_stg_Leave",
+            "ImportLeaveType",
+            "ImportClient",
+            "ImportEmployee",
+            "ImportProject"
+          )
 
-          -- Delete job if it exists
-          IF EXISTS (SELECT * FROM msdb.dbo.sysjobs WHERE name = 'RunSSIS_IntegrationProject1')
-          BEGIN
-              EXEC msdb.dbo.sp_delete_job @job_name='RunSSIS_IntegrationProject1';
-          END;
+          foreach ($pkg in $packages) {
+            $jobName = "RunSSIS_$pkg"
+            $scheduleName = "Daily2AM_$pkg"
 
-          -- Create job
-          EXEC msdb.dbo.sp_add_job
-              @job_name = 'RunSSIS_IntegrationProject1',
+            $jobScript = "
+            USE msdb;
+
+            IF EXISTS (SELECT * FROM msdb.dbo.sysjobs WHERE name = '$jobName')
+            BEGIN
+              EXEC msdb.dbo.sp_delete_job @job_name = '$jobName';
+            END;
+
+            EXEC msdb.dbo.sp_add_job
+              @job_name = '$jobName',
               @enabled = 1;
 
-          -- Add job step to run SSIS package
-          EXEC msdb.dbo.sp_add_jobstep
-              @job_name = 'RunSSIS_IntegrationProject1',
+            EXEC msdb.dbo.sp_add_jobstep
+              @job_name = '$jobName',
               @step_name = 'Run SSIS Package',
               @subsystem = 'SSIS',
-              @command = '/ISSERVER ""SSISDB\\MySSISPackages\\Integration Services Project1\\Package.dtsx"" /SERVER ""$env:SQL_SERVER""',
+              @command = '/ISSERVER ""SSISDB\\MySSISPackages\\Integration Services Project1\\$pkg.dtsx"" /SERVER ""$env:SQL_SERVER""',
               @on_success_action = 1;
 
-          -- Add job schedule (daily at 2:00 AM)
-          DECLARE @schedule_id INT;
-          EXEC msdb.dbo.sp_add_schedule
-              @schedule_name = 'Daily2AM',
+            DECLARE @schedule_id INT;
+            EXEC msdb.dbo.sp_add_schedule
+              @schedule_name = '$scheduleName',
               @enabled = 1,
-              @freq_type = 4, -- daily
+              @freq_type = 4,
               @freq_interval = 1,
-              @active_start_time = 020000, -- 2:00 AM
+              @active_start_time = 020000,
               @schedule_id = @schedule_id OUTPUT;
 
-          -- Attach schedule to job
-          EXEC msdb.dbo.sp_attach_schedule
-              @job_name = 'RunSSIS_IntegrationProject1',
-              @schedule_name = 'Daily2AM';
+            EXEC msdb.dbo.sp_attach_schedule
+              @job_name = '$jobName',
+              @schedule_name = '$scheduleName';
 
-          -- Assign job to server
-          EXEC msdb.dbo.sp_add_jobserver
-              @job_name = 'RunSSIS_IntegrationProject1';
-          "
+            EXEC msdb.dbo.sp_add_jobserver
+              @job_name = '$jobName';
+            "
 
-          Invoke-Sqlcmd -ServerInstance $env:SQL_SERVER -Query $jobScript
-          echo "SQL Agent Job and schedule created successfully."
+            Invoke-Sqlcmd -ServerInstance $env:SQL_SERVER -Query $jobScript
+            echo "Created job and schedule for package: $pkg"
+          }
+
+          echo "All SQL Agent jobs and schedules created successfully."
