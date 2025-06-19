@@ -79,6 +79,10 @@ jobs:
         run: |
           Write-Host "Creating SQL Agent Jobs to run every 2 minutes..."
 
+          # Calculate start date and time in PowerShell
+          $startDate = (Get-Date).ToString("yyyyMMdd") # e.g., 20250619
+          $startTime = (Get-Date).ToString("HHmmss")   # e.g., 225100 for 10:51 PM
+
           $packages = @(
             "Stg_Months",
             "Load_stg_Leave",
@@ -109,7 +113,7 @@ jobs:
               @job_name = '$jobName',
               @step_name = 'Run SSIS Package',
               @subsystem = 'SSIS',
-              @command = '/ISSERVER ""SSISDB\\MySSISPackages\\Integration Services Project1\\${pkg}.dtsx"" /SERVER ""$env:SQL_SERVER""',
+              @command = '/ISSERVER \""SSISDB\\MySSISPackages\\Integration Services Project1\\${pkg}.dtsx\"" /SERVER \""$env:SQL_SERVER\""', 
               @on_success_action = 1,
               @database_name = 'SSISDB';
 
@@ -121,8 +125,8 @@ jobs:
               @freq_interval = 1, -- Every day
               @freq_subday_type = 4, -- Minutes
               @freq_subday_interval = 2, -- Every 2 minutes
-              @active_start_date = CONVERT(VARCHAR(8), GETDATE(), 112), -- Today
-              @active_start_time = REPLACE(CONVERT(VARCHAR(8), GETDATE(), 108), ':', ''), -- Now
+              @active_start_date = $startDate,
+              @active_start_time = $startTime,
               @schedule_id = @schedule_id OUTPUT;
 
             EXEC msdb.dbo.sp_attach_schedule
@@ -135,7 +139,7 @@ jobs:
 
             try {
               Invoke-Sqlcmd -ServerInstance $env:SQL_SERVER -Username $env:SQL_USERNAME -Password $env:SQL_PASSWORD -Query $jobScript -ErrorAction Stop
-              Write-Host "Created job $jobName to run every 2 minutes for package: ${pkg}"
+              Write-Host "Created job $jobName to run every 2 minutes starting at $startTime on $startDate for package: ${pkg}"
             } catch {
               Write-Error "Failed to create job for package ${pkg}: $($_.Exception.Message)"
               exit 1
