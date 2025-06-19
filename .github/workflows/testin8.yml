@@ -30,7 +30,7 @@ jobs:
       run: |
         sqlcmd -S "%SQL_SERVER%" -E -i "Database\create_timesheetdb.sql"
 
-    # Create SSISDB folder (Windows Auth only)
+    # Create SSISDB folder
     - name: Create SSIS folder if not exists
       shell: cmd
       env:
@@ -44,32 +44,33 @@ jobs:
         echo END >> create_folder.sql
         sqlcmd -S "%SQL_SERVER%" -E -i create_folder.sql
 
-    # Deploy .ispac as VARBINARY using certutil + sqlcmd
-    - name: Convert ISPAC to Hex and Deploy to SSISDB
+    # Check if ISPAC exists
+    - name: Validate ISPAC file exists
+      shell: cmd
+      run: |
+        if not exist "Database\bin\Development\Integration Services Project1.ispac" (
+          echo ERROR: ISPAC file not found!
+          exit /b 1
+        )
+
+    # Deploy SSIS package using ISDeploymentWizard
+    - name: Deploy SSIS package
       shell: cmd
       env:
         SQL_SERVER: ${{ secrets.SQL_SERVER }}
         SSIS_FOLDER_NAME: ${{ env.SSIS_FOLDER_NAME }}
         SSIS_PROJECT_NAME: ${{ env.SSIS_PROJECT_NAME }}
       run: |
-        certutil -encodehex "Database\bin\Development\Integration Services Project1.ispac" ispac.hex 0x30
-        echo SET NOCOUNT ON; > deploy_ssis.sql
-        echo DECLARE @ispac_binary VARBINARY(MAX); >> deploy_ssis.sql
-        echo SET @ispac_binary = 0x >> deploy_ssis.sql
-        for /F "tokens=* usebackq" %%A in (`type ispac.hex`) do (
-          echo %%A >> deploy_ssis.sql
-        )
-        echo ; >> deploy_ssis.sql
-        echo DECLARE @operation_id BIGINT; >> deploy_ssis.sql
-        echo EXEC SSISDB.catalog.deploy_project >> deploy_ssis.sql
-        echo   @folder_name = N'%SSIS_FOLDER_NAME%', >> deploy_ssis.sql
-        echo   @project_name = N'%SSIS_PROJECT_NAME%', >> deploy_ssis.sql
-        echo   @project_stream = @ispac_binary, >> deploy_ssis.sql
-        echo   @operation_id = @operation_id OUTPUT; >> deploy_ssis.sql
-        echo SELECT @operation_id AS OperationID; >> deploy_ssis.sql
-        sqlcmd -S "%SQL_SERVER%" -E -i deploy_ssis.sql
+        echo Deploying SSIS package using ISDeploymentWizard...
+        "C:\Program Files (x86)\Microsoft SQL Server\150\DTS\Binn\ISDeploymentWizard.exe" ^
+          /Silent ^
+          /SourcePath:"Database\bin\Development\Integration Services Project1.ispac" ^
+          /DestinationServer:"%SQL_SERVER%" ^
+          /DestinationPath:"\SSISDB\%SSIS_FOLDER_NAME%" ^
+          /ProjectName:"%SSIS_PROJECT_NAME%" ^
+          /Overwrite
 
-    # Create SQL Agent Job
+    # Create SQL Agent Job to run the package
     - name: Create SQL Agent Job
       shell: cmd
       env:
