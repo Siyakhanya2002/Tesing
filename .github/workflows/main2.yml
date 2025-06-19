@@ -1,0 +1,65 @@
+name: Database Automation
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-db:
+    runs-on: [self-hosted, windows]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install SQL Server command-line tools
+        shell: powershell
+        run: |
+          # Check if sqlcmd is already installed
+          $sqlcmdPath = "C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\sqlcmd.exe"
+          if (Test-Path $sqlcmdPath) {
+            Write-Host "sqlcmd is already installed at $sqlcmdPath"
+          } else {
+            Write-Host "Installing SQL Server command-line tools..."
+            # Download and install SQL Server command-line tools (mssql-tools)
+            $installerUrl = "https://go.microsoft.com/fwlink/?linkid=2243102" # Latest mssql-tools for Windows as of 2025
+            $installerPath = "$env:TEMP\mssql-tools-installer.exe"
+            Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath
+            # Install silently, accepting EULA
+            Start-Process -FilePath $installerPath -ArgumentList "/quiet /iacceptsqlserverlicenseterms" -Wait
+            # Verify installation
+            if (!(Test-Path $sqlcmdPath)) {
+              Write-Error "sqlcmd installation failed"
+              exit 1
+            }
+            Write-Host "sqlcmd installed successfully"
+          }
+          # Add sqlcmd to PATH for this session
+          $env:PATH += ";C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn"
+          # Verify sqlcmd is accessible
+          sqlcmd -? | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "sqlcmd is not accessible"
+            exit 1
+          }
+
+      - name: Run SQL script
+        env:
+          SQL_SERVER: ${{ secrets.SQL_SERVER }}
+          SQL_USERNAME: ${{ secrets.SQL_USERNAME }}
+          SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
+        shell: powershell
+        run: |
+          Write-Host "Running SQL script..."
+          sqlcmd -S $env:SQL_SERVER -U $env:SQL_USERNAME -P $env:SQL_PASSWORD -i Database/create_timesheetdb.sql -o output.txt
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "SQL script execution failed"
+            cat output.txt
+            exit $LASTEXITCODE
+          }
+          Get-Content output.txt

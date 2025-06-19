@@ -1,0 +1,149 @@
+name: Full Timesheet Pipeline
+
+on:
+  workflow_dispatch:  # manual trigger from GitHub UI
+
+jobs:
+  build-and-deploy:
+    runs-on: [self-hosted, windows]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Create TimesheetDB and Tables
+        env:
+          SQL_SERVER: ${{ secrets.SQL_SERVER }}
+          SQL_USERNAME: ${{ secrets.SQL_USERNAME }}
+          SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
+        shell: powershell
+        run: |
+          Write-Host "Creating database and tables..."
+          sqlcmd -S $env:SQL_SERVER -U $env:SQL_USERNAME -P $env:SQL_PASSWORD -i Database/create_timesheetdb.sql -o output.txt
+          Get-Content output.txt
+
+      - name: Deploy SSIS Project (.ispac)
+        env:
+          SQL_SERVER: ${{ secrets.SQL_SERVER }}
+        shell: powershell
+        run: |
+          echo "Deploying SSIS project..."
+          $ispacPath = "Database/bin/Development/Integration Services Project1.ispac"
+          if (!(Test-Path $ispacPath)) {
+            Write-Error "ISPAC file not found at $ispacPath"
+            exit 1
+          }
+
+          $deployArgs = @(
+            "/Silent",
+            "/SourcePath:`"$ispacPath`"",
+            "/DestinationServer:`"$env:SQL_SERVER`"",
+            "/DestinationPath:""/SSISDB/MySSISPackages/Integration Services Project1"""
+          )
+
+          $process = Start-Process `
+            -FilePath "C:\Program Files (x86)\Microsoft SQL Server\160\DTS\Binn\ISDeploymentWizard.exe" `
+            -ArgumentList $deployArgs `
+            -Wait `
+            -PassThru `
+            -NoNewWindow
+
+          if ($process.ExitCode -ne 0) {
+            Write-Error "Deployment failed with exit code $($process.ExitCode)"
+            exit $process.ExitCode
+          }
+
+          echo "SSIS project deployed successfully."
+
+      - name: Create and run SQL Agent Jobs sequentially
+        env:
+          SQL_SERVER: ${{ secrets.SQL_SERVER }}
+        shell: powershell
+        run: |
+          $packages = @(
+            "Stg_Months",
+            "Load_stg_Leave",
+            "ImportLeaveType",
+            "ImportClient",
+            "ImportEmployee",
+            "ImportProject"
+          )
+
+          foreach ($pkg in $packages) {
+            $jobName = "RunSSIS_$pkg"
+            $scheduleName = "EveryMinute_$pkg"
+
+            $jobScript = @"
+            USE msdb;
+
+            IF EXISTS (SELECT * FROM msdb.dbo.sysjobs WHERE name = '$jobName')
+            BEGIN
+              EXEC msdb.dbo.sp_delete_job @job_name = '$jobName';
+            END;
+
+            EXEC msdb.dbo.sp_add_job
+              @job_name = '$jobName',
+              @enabled = 1;
+
+            EXEC msdb.dbo.sp_add_jobstep
+              @job_name = '$jobName',
+              @step_name = 'Run SSIS Package',
+              @subsystem = 'SSIS',
+              @command = '/ISSERVER ""SSISDB\\MySSISPackages\\Integration Services Project1\\$pkg.dtsx"" /SERVER ""$env:SQL_SERVER""',
+              @on_success_action = 1;
+
+            DECLARE @schedule_id INT;
+            EXEC msdb.dbo.sp_add_schedule
+              @schedule_name = '$scheduleName',
+              @enabled = 1,
+              @freq_type = 4,
+              @freq_interval = 1,
+              @freq_subday_type = 4,
+              @freq_subday_interval = 1,
+              @active_start_time = 000000,
+              @schedule_id = @schedule_id OUTPUT;
+
+            EXEC msdb.dbo.sp_attach_schedule
+              @job_name = '$jobName',
+              @schedule_name = '$scheduleName';
+
+            EXEC msdb.dbo.sp_add_jobserver
+              @job_name = '$jobName';
+            "@
+
+            Invoke-Sqlcmd -ServerInstance $env:SQL_SERVER -Query $jobScript
+            Write-Host "✅ Created job: $jobName"
+
+            # Start job
+            $startJobQuery = "EXEC msdb.dbo.sp_start_job N'$jobName';"
+            Invoke-Sqlcmd -ServerInstance $env:SQL_SERVER -Query $startJobQuery
+            Write-Host "▶️ Started job: $jobName"
+
+            # Poll job status until completion
+            do {
+              Start-Sleep -Seconds 5
+
+              $statusQuery = @"
+              SELECT TOP 1 run_status
+              FROM msdb.dbo.sysjobhistory
+              WHERE job_id = (SELECT job_id FROM msdb.dbo.sysjobs WHERE name = '$jobName')
+                AND step_id = 0
+              ORDER BY run_date DESC, run_time DESC
+              "@
+
+              $result = Invoke-Sqlcmd -ServerInstance $env:SQL_SERVER -Query $statusQuery
+              $status = if ($result) { $result.run_status } else { 0 }
+
+              Write-Host "Job $jobName status: $status"
+
+            } while ($status -ne 1 -and $status -ne 0)
+
+            if ($status -eq 0) {
+              Write-Error "Job $jobName failed."
+              exit 1
+            }
+
+            Write-Host "Job $jobName completed successfully."
+          }
+
+          Write-Host "✅ All jobs completed sequentially."

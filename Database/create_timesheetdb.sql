@@ -1,180 +1,168 @@
-USE master;
-GO
-
--- Create the database if it doesn't exist
-IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'TimesheetDB1')
+-- Drop TimesheetDB if it exists
+IF EXISTS (SELECT name FROM sys.databases WHERE name = N'TimesheetDB')
 BEGIN
-    CREATE DATABASE TimesheetDB1;
-    PRINT '✅ TimesheetDB1 database created.';
+    ALTER DATABASE TimesheetDB SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+    DROP DATABASE TimesheetDB;
+    PRINT 'TimesheetDB database dropped.';
 END
-ELSE
-BEGIN
-    PRINT 'ℹ️ TimesheetDB1 database already exists.';
-END
+
+-- Create TimesheetDB
+CREATE DATABASE TimesheetDB;
+PRINT 'TimesheetDB database created.';
 GO
 
--- Switch to TimesheetDB
-USE TimesheetDB1;
+-- Use TimesheetDB
+USE TimesheetDB;
 GO
 
--- Create the stored procedure to recreate tables if not exists
-IF OBJECT_ID('dbo.usp_EnsureTimesheetSchema', 'P') IS NOT NULL 
-    DROP PROCEDURE dbo.usp_EnsureTimesheetSchema;
-GO
-
-CREATE PROCEDURE dbo.usp_EnsureTimesheetSchema
+-- Create stored procedure to create tables
+CREATE OR ALTER PROCEDURE CreateTimesheetDB
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    PRINT '⚙️ Checking and creating missing tables in TimesheetDB...';
-
-    -- Employee
-    IF OBJECT_ID('dbo.Employee', 'U') IS NULL
+    -- Create AuditLog1 table
+    IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[AuditLog1]') AND type in (N'U'))
     BEGIN
-        CREATE TABLE dbo.Employee (
-            EmployeeID   INT IDENTITY(1,1) PRIMARY KEY,
-            EmployeeName VARCHAR(150) NOT NULL UNIQUE
+        CREATE TABLE [dbo].[AuditLog1](
+            [AuditID] [int] IDENTITY(1,1) NOT NULL,
+            [PackageName] [nvarchar](255) NULL,
+            [TaskName] [nvarchar](255) NULL,
+            [TableName] [nvarchar](255) NULL,
+            [RowsLoaded] [int] NULL,
+            [RunDate] [datetime] NULL,
+            [ExecutedBy] [nvarchar](255) NULL,
+            [EmployeeName] [nvarchar](255) NULL,
+            [SheetName] [nvarchar](255) NULL,
+            PRIMARY KEY CLUSTERED ([AuditID] ASC)
         );
-        PRINT '✅ Employee table created.';
+        PRINT 'AuditLog1 table created.';
     END
 
-    -- Client
-    IF OBJECT_ID('dbo.Client', 'U') IS NULL
+    -- Create Client table
+    IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Client]') AND type in (N'U'))
     BEGIN
-        CREATE TABLE dbo.Client (
-            ClientID   INT IDENTITY(1,1) PRIMARY KEY,
-            ClientName VARCHAR(200) NOT NULL UNIQUE
+        CREATE TABLE [dbo].[Client](
+            [ClientID] [int] IDENTITY(1,1) NOT NULL,
+            [ClientName] [varchar](200) NOT NULL,
+            PRIMARY KEY CLUSTERED ([ClientID] ASC)
         );
-        PRINT '✅ Client table created.';
+        PRINT 'Client table created.';
     END
 
-    -- Project
-    IF OBJECT_ID('dbo.Project', 'U') IS NULL
+    -- Create Employee table
+    IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Employee]') AND type in (N'U'))
     BEGIN
-        CREATE TABLE dbo.Project (
-            ProjectID   INT IDENTITY(1,1) PRIMARY KEY,
-            ClientID    INT NOT NULL,
-            ProjectName VARCHAR(200) NOT NULL,
-            CONSTRAINT FK_Project_Client FOREIGN KEY (ClientID) REFERENCES dbo.Client(ClientID),
-            CONSTRAINT UQ_Project_Client_Project UNIQUE (ClientID, ProjectName)
+        CREATE TABLE [dbo].[Employee](
+            [EmployeeID] [int] IDENTITY(1,1) NOT NULL,
+            [EmployeeName] [varchar](50) NOT NULL,
+            PRIMARY KEY CLUSTERED ([EmployeeID] ASC)
         );
-        PRINT '✅ Project table created.';
+        PRINT 'Employee table created.';
     END
 
-    -- ExpenseCategory
-    IF OBJECT_ID('dbo.ExpenseCategory', 'U') IS NULL
+    -- Create ErrorLog1 table
+    IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[ErrorLog1]') AND type in (N'U'))
     BEGIN
-        CREATE TABLE dbo.ExpenseCategory (
-            ExpenseCategoryID INT IDENTITY(1,1) PRIMARY KEY,
-            CategoryName VARCHAR(100) NOT NULL UNIQUE
+        CREATE TABLE [dbo].[ErrorLog1](
+            [ErrorLogID] [int] IDENTITY(1,1) NOT NULL,
+            [ErrorTimeUTC] [datetime] NULL,
+            [PackageName] [nvarchar](255) NULL,
+            [TaskName] [nvarchar](255) NULL,
+            [ErrorMessage] [nvarchar](max) NULL,
+            [TableName] [nvarchar](255) NULL,
+            [ComponentName] [varchar](100) NULL,
+            PRIMARY KEY CLUSTERED ([ErrorLogID] ASC)
         );
-        PRINT '✅ ExpenseCategory table created.';
+        PRINT 'ErrorLog1 table created.';
     END
 
-    -- LeaveType
-    IF OBJECT_ID('dbo.LeaveType', 'U') IS NULL
+    -- Create Leave table
+    IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Leave]') AND type in (N'U'))
     BEGIN
-        CREATE TABLE dbo.LeaveType (
-            LeaveTypeID INT IDENTITY(1,1) PRIMARY KEY,
-            TypeName VARCHAR(100) NOT NULL UNIQUE
+        CREATE TABLE [dbo].[Leave](
+            [LeaveID] [int] IDENTITY(1,1) NOT NULL,
+            [EmployeeID] [int] NOT NULL,
+            [LeaveTypeID] [int] NOT NULL,
+            [StartDate] [date] NOT NULL,
+            [EndDate] [date] NOT NULL,
+            [NumberOfDays] [decimal](5, 2) NOT NULL,
+            [ApprovalObtained] [bit] NOT NULL,
+            [SickNoteFilePath] [varchar](260) NULL,
+            PRIMARY KEY CLUSTERED ([LeaveID] ASC)
         );
-        PRINT '✅ LeaveType table created.';
+        PRINT 'Leave table created.';
     END
 
-    -- TimesheetEntry
-    IF OBJECT_ID('dbo.TimesheetEntry', 'U') IS NULL
+    -- Create LeaveType table
+    IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[LeaveType]') AND type in (N'U'))
     BEGIN
-        CREATE TABLE dbo.TimesheetEntry (
-            TimesheetID BIGINT IDENTITY(1,1) PRIMARY KEY,
-            EmployeeID INT NOT NULL,
-            ProjectID INT NOT NULL,
-            WorkDate DATE NOT NULL,
-            Billable BIT NOT NULL DEFAULT (0),
-            Description VARCHAR(500),
-            Comments VARCHAR(MAX),
-            HoursDecimal DECIMAL(5,2) NOT NULL,
-            StartTime TIME(0),
-            EndTime TIME(0),
-            CONSTRAINT FK_TS_Employee FOREIGN KEY (EmployeeID) REFERENCES dbo.Employee(EmployeeID),
-            CONSTRAINT FK_TS_Project FOREIGN KEY (ProjectID) REFERENCES dbo.Project(ProjectID),
-            CONSTRAINT UQ_Timesheet UNIQUE (EmployeeID, ProjectID, WorkDate)
+        CREATE TABLE [dbo].[LeaveType](
+            [LeaveTypeID] [int] IDENTITY(1,1) NOT NULL,
+            [TypeName] [varchar](50) NOT NULL,
+            PRIMARY KEY CLUSTERED ([LeaveTypeID] ASC)
         );
-        PRINT '✅ TimesheetEntry table created.';
+        PRINT 'LeaveType table created.';
     END
 
-    -- ExpenseEntry
-    IF OBJECT_ID('dbo.ExpenseEntry', 'U') IS NULL
+    -- Create Stg_Leave1 table
+    IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Stg_Leave1]') AND type in (N'U'))
     BEGIN
-        CREATE TABLE dbo.ExpenseEntry (
-            ExpenseID BIGINT IDENTITY(1,1) PRIMARY KEY,
-            EmployeeID INT NOT NULL,
-            ExpenseDate DATE NOT NULL,
-            ExpenseCategoryID INT NOT NULL,
-            ExpenseDesc VARCHAR(500),
-            AmountDEC DECIMAL(12,2) NOT NULL,
-            CONSTRAINT FK_Expense_Employee FOREIGN KEY (EmployeeID) REFERENCES dbo.Employee(EmployeeID),
-            CONSTRAINT FK_Expense_Category FOREIGN KEY (ExpenseCategoryID) REFERENCES dbo.ExpenseCategory(ExpenseCategoryID),
-            CONSTRAINT UQ_ExpenseEntry UNIQUE (EmployeeID, ExpenseDate, ExpenseCategoryID)
-        );
-        PRINT '✅ ExpenseEntry table created.';
+        CREATE TABLE [dbo].[Stg_Leave1](
+            [EmployeeName] [nvarchar](50) NULL,
+            [pathName] [nvarchar](50) NULL,
+            [TypeOfLeave] [nvarchar](100) NULL,
+            [StartDate] [nvarchar](50) NULL,
+            [EndDate] [nvarchar](50) NULL,
+            [NumberOfDays] [nvarchar](50) NULL,
+            [ApprovalObtained] [nvarchar](50) NULL,
+            [SickNote] [nvarchar](500) NULL
+        ) ON [PRIMARY];
+        PRINT 'Stg_Leave1 table created.';
     END
 
-    -- LeaveEntry
-    IF OBJECT_ID('dbo.LeaveEntry', 'U') IS NULL
+    -- Create Stg_Monthly table
+    IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Stg_Monthly]') AND type in (N'U'))
     BEGIN
-        CREATE TABLE dbo.LeaveEntry (
-            LeaveID BIGINT IDENTITY(1,1) PRIMARY KEY,
-            EmployeeID INT NOT NULL,
-            LeaveTypeID INT NOT NULL,
-            StartDate DATE NOT NULL,
-            EndDate DATE NOT NULL,
-            NumberOfDays DECIMAL(5,2) NOT NULL,
-            ApprovalObtained BIT NOT NULL DEFAULT (0),
-            SickNoteFilePath VARCHAR(260),
-            AddressDuringLeave VARCHAR(500),
-            CONSTRAINT FK_Leave_Employee FOREIGN KEY (EmployeeID) REFERENCES dbo.Employee(EmployeeID),
-            CONSTRAINT FK_Leave_Type FOREIGN KEY (LeaveTypeID) REFERENCES dbo.LeaveType(LeaveTypeID),
-            CONSTRAINT UQ_LeaveEntry UNIQUE (EmployeeID, StartDate, EndDate)
-        );
-        PRINT '✅ LeaveEntry table created.';
+        CREATE TABLE [dbo].[Stg_Monthly](
+            [EmployeeName] [varchar](50) NULL,
+            [SheetName] [varchar](50) NULL,
+            [Date] [nvarchar](50) NULL,
+            [DOfWeek] [nvarchar](50) NULL,
+            [Client] [nvarchar](200) NULL,
+            [ClientProjectName] [nvarchar](200) NULL,
+            [Description] [nvarchar](500) NULL,
+            [BillableOrNonBillable] [nvarchar](50) NULL,
+            [Comments] [nvarchar](max) NULL,
+            [TotalHours] [nvarchar](50) NULL,
+            [StartTime] [nvarchar](50) NULL,
+            [EndTime] [nvarchar](50) NULL
+        ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY];
+        PRINT 'Stg_Monthly table created.';
     END
 
-    -- AuditLog1
-    IF OBJECT_ID('dbo.AuditLog1', 'U') IS NULL
+    -- Create Timesheet table
+    IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Timesheet]') AND type in (N'U'))
     BEGIN
-        CREATE TABLE dbo.AuditLog1 (
-            AuditID INT IDENTITY(1,1) PRIMARY KEY,
-            PackageName NVARCHAR(255),
-            TaskName NVARCHAR(255),
-            TableName NVARCHAR(255),
-            RowsLoaded INT,
-            RunDate DATETIME,
-            ExecutedBy NVARCHAR(255),
-            EmployeeName NVARCHAR(255),
-            SheetName NVARCHAR(255)
+        CREATE TABLE [dbo].[Timesheet](
+            [TimesheetID] [int] IDENTITY(1,1) NOT NULL,
+            [EmployeeID] [int] NOT NULL,
+            [WorkDate] [date] NOT NULL,
+            [DayOfWeek] [varchar](255) NOT NULL,
+            [ClientProjectName] [varchar](255) NULL,
+            [Description] [varchar](255) NULL,
+            [Billable] [varchar](255) NULL,
+            [Comments] [varchar](max) NULL,
+            [StartTime] [time](7) NULL,
+            [EndTime] [time](7) NULL,
+            [HoursDecimal] [time](7) NULL,
+            PRIMARY KEY CLUSTERED ([TimesheetID] ASC)
         );
-        PRINT '✅ AuditLog1 table created.';
+        PRINT 'Timesheet table created.';
     END
-
-    -- ErrorLog1
-    IF OBJECT_ID('dbo.ErrorLog1', 'U') IS NULL
-    BEGIN
-        CREATE TABLE dbo.ErrorLog1 (
-            ErrorLogID INT IDENTITY(1,1) PRIMARY KEY,
-            ErrorTimeUTC DATETIME,
-            PackageName NVARCHAR(255),
-            TaskName NVARCHAR(255),
-            ErrorMessage NVARCHAR(MAX),
-            TableName NVARCHAR(255)
-        );
-        PRINT '✅ ErrorLog1 table created.';
-    END
-
-    PRINT '🎉 All tables ensured. Schema is ready.';
-END;
+END
 GO
 
--- Run the procedure to ensure tables exist
-EXEC dbo.usp_EnsureTimesheetSchema;
+-- Execute the stored procedure to create tables
+EXEC CreateTimesheetDB;
 GO

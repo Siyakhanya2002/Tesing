@@ -1,0 +1,148 @@
+name: Deploy SSIS Project and Create Scheduled Jobs
+
+on:
+  workflow_run:
+    workflows: ["Database Automation"]
+    types:
+      - completed
+  workflow_dispatch:
+
+jobs:
+  deploy-ssis-project:
+    runs-on: [self-hosted, windows]
+    if: github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Verify SSISDB Catalog
+        env:
+          SQL_SERVER: ${{ secrets.SQL_SERVER }}
+          SQL_USERNAME: ${{ secrets.SQL_USERNAME }}
+          SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
+        shell: powershell
+        run: |
+          Write-Host "Verifying SSISDB catalog..."
+          $query = "
+          USE master;
+          IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name = 'SSISDB')
+          BEGIN
+              RAISERROR ('SSISDB database does not exist', 16, 1);
+          END
+          "
+          Invoke-Sqlcmd -ServerInstance $env:SQL_SERVER -Username $env:SQL_USERNAME -Password $env:SQL_PASSWORD -Query $query -ErrorAction Stop
+          Write-Host "SSISDB catalog verified."
+
+      - name: Deploy SSIS Project (.ispac)
+        env:
+          SQL_SERVER: ${{ secrets.SQL_SERVER }}
+        shell: powershell
+        run: |
+          Write-Host "Deploying SSIS project..."
+          $ispacPath = "Database/bin/Development/Integration Services Project1.ispac"
+          if (!(Test-Path $ispacPath)) {
+            Write-Error "ISPAC file not found at $ispacPath"
+            exit 1
+          }
+
+          $deployArgs = @(
+            "/Silent",
+            "/SourcePath:`"$ispacPath`"",
+            "/DestinationServer:`"$env:SQL_SERVER`"",
+            "/DestinationPath:""/SSISDB/MySSISPackages/Integration Services Project1"""
+          )
+
+          $process = Start-Process `
+            -FilePath "C:\Program Files (x86)\Microsoft SQL Server\160\DTS\Binn\ISDeploymentWizard.exe" `
+            -ArgumentList $deployArgs `
+            -Wait `
+            -PassThru `
+            -NoNewWindow `
+            -RedirectStandardOutput "deploy_output.txt" `
+            -RedirectStandardError "deploy_error.txt"
+
+          if ($process.ExitCode -ne 0) {
+            Write-Error "Deployment failed with exit code $($process.ExitCode)"
+            Get-Content deploy_error.txt
+            exit $process.ExitCode
+          }
+          Write-Host "SSIS project deployed successfully."
+          Get-Content deploy_output.txt
+
+      - name: Create SQL Agent Jobs with Recurring Schedule
+        env:
+          SQL_SERVER: ${{ secrets.SQL_SERVER }}
+          SQL_USERNAME: ${{ secrets.SQL_USERNAME }}
+          SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
+        shell: powershell
+        run: |
+          Write-Host "Creating SQL Agent Jobs to run every 2 minutes..."
+
+          # Calculate start date and time in PowerShell
+          $startDate = (Get-Date).ToString("yyyyMMdd") # e.g., 20250619
+          $startTime = (Get-Date).ToString("HHmmss")   # e.g., 225100 for 10:51 PM
+
+          $packages = @(
+            "Stg_Months",
+            "Load_stg_Leave",
+            "ImportLeaveType",
+            "ImportClient",
+            "ImportEmployee",
+            "ImportProject"
+          )
+
+          foreach ($pkg in $packages) {
+            $jobName = "RunSSIS_${pkg}"
+            $scheduleName = "Every2Min_${pkg}"
+
+            $jobScript = "
+            USE msdb;
+
+            IF EXISTS (SELECT * FROM msdb.dbo.sysjobs WHERE name = '$jobName')
+            BEGIN
+              EXEC msdb.dbo.sp_delete_job @job_name = '$jobName';
+            END;
+
+            EXEC msdb.dbo.sp_add_job
+              @job_name = '$jobName',
+              @enabled = 1,
+              @owner_login_name = '$env:SQL_USERNAME';
+
+            EXEC msdb.dbo.sp_add_jobstep
+              @job_name = '$jobName',
+              @step_name = 'Run SSIS Package',
+              @subsystem = 'SSIS',
+              @command = '/ISSERVER \""SSISDB\\MySSISPackages\\Integration Services Project1\\${pkg}.dtsx\"" /SERVER \""$env:SQL_SERVER\""', 
+              @on_success_action = 1,
+              @database_name = 'SSISDB';
+
+            DECLARE @schedule_id INT;
+            EXEC msdb.dbo.sp_add_schedule
+              @schedule_name = '$scheduleName',
+              @enabled = 1,
+              @freq_type = 4, -- Daily
+              @freq_interval = 1, -- Every day
+              @freq_subday_type = 4, -- Minutes
+              @freq_subday_interval = 2, -- Every 2 minutes
+              @active_start_date = $startDate,
+              @active_start_time = $startTime,
+              @schedule_id = @schedule_id OUTPUT;
+
+            EXEC msdb.dbo.sp_attach_schedule
+              @job_name = '$jobName',
+              @schedule_name = '$scheduleName';
+
+            EXEC msdb.dbo.sp_add_jobserver
+              @job_name = '$jobName';
+            "
+
+            try {
+              Invoke-Sqlcmd -ServerInstance $env:SQL_SERVER -Username $env:SQL_USERNAME -Password $env:SQL_PASSWORD -Query $jobScript -ErrorAction Stop
+              Write-Host "Created job $jobName to run every 2 minutes starting at $startTime on $startDate for package: ${pkg}"
+            } catch {
+              Write-Error "Failed to create job for package ${pkg}: $($_.Exception.Message)"
+              exit 1
+            }
+          }
+          Write-Host "All SQL Agent jobs created with recurring 2-minute schedule."
