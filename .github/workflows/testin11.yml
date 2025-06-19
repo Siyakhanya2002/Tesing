@@ -65,7 +65,7 @@ jobs:
         "C:\Program Files\Microsoft SQL Server\160\DTS\Binn\ISDeploymentWizard.exe" ^
           /Silent ^
           /SourcePath:"C:\Path\To\Database\bin\Development\Integration Services Project1.ispac" ^
-          /DestinationServer:"localhost" ^
+          /DestinationServer:"SAMBE2025017" ^
           /DestinationPath:"\SSISDB\Timesheet\Integration Services Project1" ^
           /ProjectName:"Integration Services Project1" ^
           /Overwrite
