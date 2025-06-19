@@ -1,10 +1,13 @@
-name: Database Deployment
+name: Database Automation
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
-    branches: [main]
+    branches:
+      - main
+  workflow_dispatch: # Added to allow manual triggering
 
 jobs:
   build-db:
@@ -23,20 +26,27 @@ jobs:
           sudo apt-get update
           sudo ACCEPT_EULA=Y apt-get install -y mssql-tools unixodbc-dev
           echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bashrc
+          echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.profile
+          echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bash_profile
           source ~/.bashrc
           /opt/mssql-tools/bin/sqlcmd -? || echo "sqlcmd installation failed"
 
       - name: Run SQL script
         env:
-          SQL_SERVER1: ${{ secrets.SQL_SERVER1 }}
+          SQL_SERVER: ${{ secrets.SQL_SERVER }}
           SQL_USERNAME: ${{ secrets.SQL_USERNAME }}
           SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
         run: |
-          /opt/mssql-tools/bin/sqlcmd -S $SQL_SERVER1 -U $SQL_USERNAME -P $SQL_PASSWORD  -i Database/create_timesheetdb.sql -o output.txt
+          /opt/mssql-tools/bin/sqlcmd -S $SQL_SERVER -U $SQL_USERNAME -P $SQL_PASSWORD -i Database/create_timesheetdb.sql -o output.txt
           cat output.txt
 
-      - name: Trigger SSIS Workflow
-        uses: peter-evans/repository-dispatch@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          event-type: trigger-ssis
+  trigger-ssis-deploy:
+    needs: build-db
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch SSIS Deploy Workflow
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run "Deploy SSIS Project and Create Scheduled Jobs" --repo ${{ github.repository }}
+        shell: bash
