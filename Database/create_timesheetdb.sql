@@ -11,6 +11,11 @@ CREATE DATABASE TimesheetDB;
 PRINT 'TimesheetDB database created.';
 GO
 
+-- Use TimesheetDB
+USE TimesheetDB;
+GO
+
+-- Create stored procedure to create tables
 CREATE OR ALTER PROCEDURE CreateTimesheetDB
 AS
 BEGIN
@@ -156,4 +161,8 @@ BEGIN
         PRINT 'Timesheet table created.';
     END
 END
+GO
+
+-- Execute the stored procedure to create tables
+EXEC CreateTimesheetDB;
 GO
