@@ -76,7 +76,7 @@ jobs:
         %WIZARD% ^
           /SourcePath:"Database\bin\Development\Integration Services Project1.ispac" ^
           /DestinationServer:"%SQL_SERVER%" ^
-          /DestinationPath:"/SSISDB/%SSIS_FOLDER_NAME%/%SSIS_PROJECT_NAME%" > deploy_log.txt 2>&1
+          /DestinationPath:"\SSISDB\Timesheet\Integration Services Project1" > deploy_log.txt 2>&1
         if %ERRORLEVEL% neq 0 (
           echo ERROR: SSIS deployment failed. See deploy_log.txt for details.
           type deploy_log.txt
