@@ -119,7 +119,7 @@ jobs:
               Invoke-Sqlcmd -ServerInstance $env:SQL_SERVER -Username $env:SQL_USERNAME -Password $env:SQL_PASSWORD -Query $execScript -ErrorAction Stop
               Write-Host "Package $pkg executed successfully."
             } catch {
-              Write-Error "Failed to execute package $pkg: $_"
+              Write-Error "Failed to execute package ${pkg}: $($_.Exception.Message)"
               $errorQuery = "
               SELECT message
               FROM SSISDB.catalog.event_messages
@@ -127,8 +127,12 @@ jobs:
               AND message_type IN (120, 130)
               ORDER BY event_message_id DESC;
               "
-              $errorDetails = Invoke-Sqlcmd -ServerInstance $env:SQL_SERVER -Username $env:SQL_USERNAME -Password $env:SQL_PASSWORD -Query $errorQuery
-              Write-Host "SSIS error details: $($errorDetails.message)"
+              try {
+                $errorDetails = Invoke-Sqlcmd -ServerInstance $env:SQL_SERVER -Username $env:SQL_USERNAME -Password $env:SQL_PASSWORD -Query $errorQuery
+                Write-Host "SSIS error details: $($errorDetails.message)"
+              } catch {
+                Write-Host "Failed to retrieve SSIS error details: $($_.Exception.Message)"
+              }
               exit 1
             }
           }
@@ -202,7 +206,7 @@ jobs:
               Invoke-Sqlcmd -ServerInstance $env:SQL_SERVER -Username $env:SQL_USERNAME -Password $env:SQL_PASSWORD -Query $jobScript -ErrorAction Stop
               Write-Host "Created job $jobName to run at $startTime on $startDate for package: $pkg"
             } catch {
-              Write-Error "Failed to create job for package $pkg: $_"
+              Write-Error "Failed to create job for package ${pkg}: $($_.Exception.Message)"
               exit 1
             }
           }
