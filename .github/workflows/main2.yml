@@ -28,11 +28,11 @@ jobs:
 
       - name: Run SQL script
         env:
-          SQL_SERVER: ${{ secrets.SQL_SERVER }}
+          SQL_SERVER: ${{ secrets.SQL_SERVER1 }}
           SQL_USERNAME: ${{ secrets.SQL_USERNAME }}
           SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
         run: |
-          /opt/mssql-tools/bin/sqlcmd -S $SQL_SERVER -U $SQL_USERNAME -P $SQL_PASSWORD  -i Database/create_timesheetdb.sql -o output.txt
+          /opt/mssql-tools/bin/sqlcmd -S $SQL_SERVER1 -U $SQL_USERNAME -P $SQL_PASSWORD  -i Database/create_timesheetdb.sql -o output.txt
           cat output.txt
 
       - name: Trigger SSIS Workflow
