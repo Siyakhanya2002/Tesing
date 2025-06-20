@@ -49,8 +49,8 @@ jobs:
           $deployArgs = @(
             "/Silent",
             "/SourcePath:`"$ispacPath`"",
-            "/DestinationServer:`"$env:SQL_SERVER`"",
-            "/DestinationPath:""/SSISDB/MySSISPackages/Integration Services Project1"""
+            "/DestinationServer:""SAMBE2025017""",
+            "/DestinationPath:""\SSISDB\MySSISPackages\Integration Services Project1"""
           )
 
           $process = Start-Process `
