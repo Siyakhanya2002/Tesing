@@ -50,7 +50,7 @@ jobs:
             "/Silent",
             "/SourcePath:`"$ispacPath`"",
             "/DestinationServer:""SAMBE2025017""",
-            "/DestinationPath:""\SSISDB\MySSISPackages\Integration Services Project1"""
+            "/DestinationPath:""/SSISDB/MySSISPackages/Integration Services Project1"""
           )
 
           $process = Start-Process `
