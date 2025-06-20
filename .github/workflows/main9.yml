@@ -113,7 +113,7 @@ jobs:
               @job_name = '$jobName',
               @step_name = 'Run SSIS Package',
               @subsystem = 'SSIS',
-              @command = '/ISSERVER \""SSISDB\MySSISPackages\Integration Services Project1\${pkg}.dtsx\"" /SERVER ""$env:SQL_SERVER""', 
+              @command = '/ISSERVER \""SSISDB\MySSISPackages\Integration Services Project1\${pkg}.dtsx "" /SERVER ""$env:SQL_SERVER""', 
               @on_success_action = 1,
               @database_name = 'SSISDB';
 
