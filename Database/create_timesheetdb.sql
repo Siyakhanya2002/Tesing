@@ -34,6 +34,7 @@ BEGIN
             [ExecutedBy] [nvarchar](255) NULL,
             [EmployeeName] [nvarchar](255) NULL,
             [SheetName] [nvarchar](255) NULL,
+            [ChangeType] [VARCHAR](20) NULL,
             PRIMARY KEY CLUSTERED ([AuditID] ASC)
         );
         PRINT 'AuditLog1 table created.';
