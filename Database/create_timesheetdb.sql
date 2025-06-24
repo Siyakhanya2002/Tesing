@@ -72,7 +72,6 @@ BEGIN
             [TaskName] [nvarchar](255) NULL,
             [ErrorMessage] [nvarchar](max) NULL,
             [TableName] [nvarchar](255) NULL,
-            [ComponentName] [varchar](100) NULL,
             PRIMARY KEY CLUSTERED ([ErrorLogID] ASC)
         );
         PRINT 'ErrorLog1 table created.';
